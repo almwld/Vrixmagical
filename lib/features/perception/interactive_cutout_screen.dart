@@ -133,7 +133,8 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
     ];
     setState(() {
       _busy = true;
-      if (!_excludeMode) { _promptX = x; _promptY = y; _currentViewSaved = false; }
+      _currentViewSaved = false;
+      if (!_excludeMode) { _promptX = x; _promptY = y; }
       _status = _excludeMode ? 'جارٍ إزالة المنطقة المحددة من القناع…' : 'جارٍ عزل الجسم محلياً…';
       _strokes.add(Stroke(
         brushMode: _excludeMode ? BrushMode.negative : BrushMode.positive,
