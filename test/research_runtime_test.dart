@@ -44,6 +44,38 @@ void main() {
       expect(physics.advance(1), 5);
     });
 
+    test('rejects non-finite body state, impulses and out-of-range friction', () {
+      final physics = FixedStepPhysics();
+      expect(
+        () => physics.addBody(PhysicsBody(
+          objectId: 'nan-position',
+          position: const Vec3(double.nan, 0, 0),
+        )),
+        throwsArgumentError,
+      );
+      expect(
+        () => physics.addBody(PhysicsBody(
+          objectId: 'infinite-velocity',
+          position: Vec3.zero(),
+          velocity: const Vec3(double.infinity, 0, 0),
+        )),
+        throwsArgumentError,
+      );
+      physics.addBody(PhysicsBody(objectId: 'valid', position: Vec3.zero()));
+      expect(
+        () => physics.applyImpulse('valid', const Vec3(0, double.nan, 0)),
+        throwsArgumentError,
+      );
+      expect(
+        () => physics.addCollider(const Collider(
+          objectId: 'valid',
+          halfExtents: Vec3.one(),
+          friction: 1.01,
+        )),
+        throwsArgumentError,
+      );
+    });
+
     test('rejects invalid bodies and time deltas', () {
       final physics = FixedStepPhysics();
       expect(
