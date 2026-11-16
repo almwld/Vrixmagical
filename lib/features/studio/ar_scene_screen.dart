@@ -203,6 +203,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     final anchor = ARPlaneAnchor(transformation: hit.worldTransform);
     String? floorBodyId;
     String? dynamicBodyId;
+    ARNode? createdNode;
+    var anchorWasAdded = false;
 
     try {
       final anchored = await anchors.addAnchor(anchor);
@@ -210,6 +212,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         if (mounted) setState(() => _status = 'تعذّر تثبيت الجسم على هذا السطح.');
         return;
       }
+      anchorWasAdded = true;
 
       final node = ARNode(
         type: NodeType.webGLB,
@@ -217,6 +220,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         position: Vector3(0, 0.16, 0),
         scale: Vector3(0.12, 0.12, 0.12),
       );
+      createdNode = node;
       final added = await objects.addNode(node, planeAnchor: anchor);
       if (added != true) {
         await anchors.removeAnchor(anchor);
@@ -282,6 +286,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     } catch (error) {
       if (dynamicBodyId != null) _physics?.removeBody(dynamicBodyId);
       if (floorBodyId != null) _physics?.removeBody(floorBodyId);
+      if (createdNode != null) await objects.removeNode(createdNode);
+      if (anchorWasAdded) await anchors.removeAnchor(anchor);
       if (mounted) setState(() => _status = 'فشلت عملية التثبيت: $error');
     } finally {
       if (mounted) setState(() => _busy = false);
