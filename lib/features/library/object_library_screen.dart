@@ -9,8 +9,8 @@ class ObjectLibraryScreen extends StatelessWidget {
     appBar: AppBar(
       title: const Text('مكتبة الأصول'),
       actions: [
-        Padding(
-          padding: const EdgeInsets.only(left: 18),
+        const Padding(
+          padding: EdgeInsets.only(left: 18),
           child: Center(
             child: Icon(Icons.search_rounded, color: AppColors.muted),
           ),
