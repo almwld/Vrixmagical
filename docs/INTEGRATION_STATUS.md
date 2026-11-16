@@ -14,10 +14,10 @@ Status labels distinguish code integration from runtime verification.
 | Image segmentation | Integrated for captured frames | Requires model bundle + device test |
 | SAM 2 / EdgeSAM interactive cut-out | Research reference only | Not integrated into Flutter runtime |
 | AR depth / occlusion | Not integrated | Device capability and API selection required |
-| Gaussian Splat rendering | Source reference only (`splatkit/`) | No Flutter renderer integration |
+| Gaussian Splat rendering | Integrated through native SplatKit Vulkan PlatformView; SPZ/LODSPLAT import | Requires Android arm64/Vulkan physical-device test |
 | Rigid-body physics in AR | Not integrated | Requires native/engine selection |
 | Fluids / soft bodies | Not integrated | Research / performance evaluation required |
 | Voice commands / VLM | Not integrated | Privacy and model selection required |
-| Android APK build | CI bootstrap configured | Must pass GitHub Actions |
+| Android APK build | CI bootstrap configured with SplatKit native dependency | Must pass GitHub Actions |
 
 Do not mark a capability complete solely because a package is declared or a screen exists. Runtime AR, hand tracking and segmentation require tests on a physical device.

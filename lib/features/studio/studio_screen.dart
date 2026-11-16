@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../hand/hand_mirror_screen.dart';
 import '../perception/scene_analysis_screen.dart';
+import '../reconstruction/gaussian_splat_screen.dart';
 import 'ar_scene_screen.dart';
 
 class StudioScreen extends StatelessWidget {
@@ -29,6 +30,13 @@ class StudioScreen extends StatelessWidget {
           subtitle: 'امسك الأصل الرقمي بإيماءة القرص وحرّكه دون لمس الجسم الحقيقي.',
           tag: 'MediaPipe Hand Landmarker',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HandMirrorScreen())),
+        ),
+        _StudioAction(
+          icon: Icons.blur_on_rounded,
+          title: 'إعادة بناء المشاهد ثلاثية الأبعاد',
+          subtitle: 'اعرض عوالم Gaussian Splat المستوردة بصيغة SPZ أو LODSPLAT على GPU.',
+          tag: 'SplatKit / Vulkan · Android arm64',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GaussianSplatScreen())),
         ),
         _StudioAction(
           icon: Icons.center_focus_strong_rounded,

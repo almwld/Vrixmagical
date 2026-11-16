@@ -60,10 +60,6 @@ class MainActivity : FlutterActivity() {
         super.onPause()
     }
 
-    override fun onDestroy() {
-        SplatKitViewRegistry.releaseAll()
-        super.onDestroy()
-    }
 }
 """)
 
@@ -94,12 +90,6 @@ internal object SplatKitViewRegistry {
     fun remove(view: SplatSurfaceView) { views.remove(view) }
     fun resumeAll() { views.forEach { it.resume() } }
     fun pauseAll() { views.forEach { it.pause() } }
-    fun releaseAll() {
-        views.toList().forEach {
-            it.release()
-            views.remove(it)
-        }
-    }
 }
 
 private class SplatKitPlatformView(

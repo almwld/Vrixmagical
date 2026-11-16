@@ -23,11 +23,14 @@ The AR scene and hand-mirror experience are separate modes. ARCore/ARKit owns th
 | MediaPipe Hand Landmarker | 21 hand landmarks and pinch tracking | Integrated live-stream path; device validation pending |
 | MediaPipe Object Detector | Object labels and bounding boxes | Integrated still-frame analysis |
 | MediaPipe Image Segmenter | Per-pixel category mask | Integrated still-frame analysis |
+| SplatKit Android / Vulkan | Gaussian Splat rendering of SPZ and LODSPLAT worlds | Integrated native Android PlatformView; arm64/Vulkan device validation pending |
 | EdgeSAM / SAM 2 | Promptable object cut-outs | Research/source reference only; not yet integrated into Android runtime |
 | Depth Anything / AR depth | Metric depth and occlusion | Not yet integrated; ARCore depth support varies by device |
 | Gaussian Splatting / NeRF | Reconstructed scene rendering | Source reference exists under `splatkit/`; Flutter renderer not yet integrated |
 | Physics / fluids | Digital rigid bodies, soft bodies and fluids | Not yet integrated in Flutter runtime |
 | Voice / vision-language model | Natural-language scene commands | Not yet integrated |
+
+SplatKit requires Android 10/API 29+, arm64-v8a and Vulkan 1.1. Import a prepared `.spz` or `.lodsplat` file from the scene viewer. PLY reconstruction/preprocessing is an offline workflow; convert PLY with the SplatKit `prepare-world.sh` tooling before importing. Splat clouds are visual geometry and are not automatically collision-ready meshes.
 
 The repository also retains separate research implementations under `Telekinesis-CV/`, `web-ar-hand-tracking/`, `splatkit/`, `arfoundation-samples/` and `xr_sandbox/`. These are source references, not automatically linked runtime modules. Check each upstream license before redistributing assets or code.
 
