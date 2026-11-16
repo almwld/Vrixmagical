@@ -159,7 +159,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         final localTransform = anchorInverse..multiply(worldTransform);
         asset.node.transform = Matrix4.compose(
           localTransform.getTranslation(),
-          localTransform.getRotation(),
+          Quaternion.fromRotation(localTransform.getRotation()),
           asset.node.scale,
         );
       }
