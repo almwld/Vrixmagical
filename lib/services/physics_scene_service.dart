@@ -1162,8 +1162,10 @@ class PhysicsSceneService {
     if (!_isFiniteMatrix(matrix)) {
       throw ArgumentError('Physics transforms must contain only finite values.');
     }
-    final position = matrix.getTranslation();
-    final rotation = Quaternion.fromRotation(matrix.getRotation());
+    final position = Vector3.zero();
+    final rotation = Quaternion.identity();
+    final scale = Vector3.zero();
+    matrix.decompose(position, rotation, scale);
     final length = math.sqrt(
       rotation.x * rotation.x +
           rotation.y * rotation.y +
