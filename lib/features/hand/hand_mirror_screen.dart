@@ -26,6 +26,7 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
   bool _shuttingDown = false;
   bool _frameBusy = false;
   bool _pinching = false;
+  final PinchGesture _pinchGesture = PinchGesture();
   Offset? _indexPosition;
   Offset? _assetPosition;
   String _status = 'جارٍ تجهيز تتبع اليد…';
@@ -122,6 +123,7 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
     if (!mounted || _shuttingDown) return;
     if (result.handLandmarks.isEmpty) {
       setState(() {
+        _pinchGesture.reset();
         _pinching = false;
         _indexPosition = null;
         _status = 'لم يتم رصد يد. قرّب يدك من مجال الكاميرا.';
@@ -129,10 +131,24 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
       return;
     }
     final landmarks = result.handLandmarks.first;
-    if (landmarks.length <= 8) return;
-    final thumb = Offset(landmarks[4].x, landmarks[4].y);
-    final index = Offset(landmarks[8].x, landmarks[8].y);
-    final pinch = HandGestureMath.isPinching(thumb, index);
+    if (landmarks.length <= 17) {
+      _pinchGesture.reset();
+      return;
+    }
+    final previewSize = _camera?.value.previewSize;
+    final aspectRatio = previewSize == null || previewSize.height == 0
+        ? 1.0
+        : previewSize.width / previewSize.height;
+    final points = landmarks
+        .map((landmark) => Offset(landmark.x, landmark.y))
+        .toList(growable: false);
+    final ratio = HandGestureMath.pinchRatio(
+      points,
+      imageAspectRatio: aspectRatio,
+    );
+    _pinchGesture.update(ratio, _clock.elapsedMilliseconds / 1000);
+    final pinch = _pinchGesture.isPinched;
+    final index = points[8];
     final point = Offset(1 - index.dx, index.dy);
 
     setState(() {
