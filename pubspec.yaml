@@ -27,5 +27,5 @@ flutter:
 hooks:
   user_defines:
     mediapipe_vision:
-      tasks: [hand_landmarker, object_detector, image_segmenter]
-      models: [hand_landmarker, object_detector, image_segmenter]
+      tasks: [hand_landmarker, object_detector, image_segmenter, interactive_segmenter]
+      models: [hand_landmarker, object_detector, image_segmenter, interactive_segmenter]
