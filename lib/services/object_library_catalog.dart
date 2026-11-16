@@ -157,7 +157,7 @@ class ObjectLibraryStore {
     final originalName = source.uri.pathSegments.isEmpty
         ? 'model'
         : source.uri.pathSegments.last;
-    final stem = originalName.replaceFirst(RegExp(r'\\.(glb|gltf)$', caseSensitive: false), '');
+    final stem = originalName.replaceFirst(RegExp(r'\.(glb|gltf)$', caseSensitive: false), '');
     final safeStem = stem.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]+'), '-');
     final timestamp = DateTime.now().microsecondsSinceEpoch;
     final fileName = '${timestamp}_${safeStem.isEmpty ? 'model' : safeStem}.$extension';
