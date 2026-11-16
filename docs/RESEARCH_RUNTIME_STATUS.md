@@ -12,7 +12,7 @@ Updated for `feature/production-jolt-physics`.
 | Contact response | Jolt broadphase/narrowphase, friction, restitution and sleeping | Scene-specific material tuning and contact regression tests pending |
 | Continuous collision | Jolt linear-cast motion quality for fast dynamic bodies | High-speed tunneling test matrix pending |
 | Sensors/events | Sensor bodies; buffered contact begin/end, sensor begin/end and activation events | App-specific gameplay consumers are not yet wired |
-| Spatial queries | Batched Jolt raycast hits with layer masks and ignore-body support | Shape-cast/overlap APIs remain to be exposed by the app service |
+| Spatial queries | Batched Jolt raycast, overlap and box shape-cast hits with layer masks and ignore-body support | GLB mesh query authoring and query performance profiling pending |
 | Constraints | Fixed, point, hinge, slider, distance and six-DOF joints; hinge/slider motors and limits | Constraint stress/limit regression tests pending |
 | Fixed stepping | Bounded 60 Hz accumulator, capped substeps, native collision substeps | Frame-time profiling on target hardware pending |
 | AR synchronization | Batch active-body pose reads -> anchor-local ARNode transforms; drag/rotate hand-off | Physical coordinate/scale calibration pending |
