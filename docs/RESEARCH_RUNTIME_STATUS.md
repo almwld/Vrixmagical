@@ -1,6 +1,6 @@
 # Research Runtime Integration Status
 
-Updated for PR #1 on `integration/unify-research-projects`.
+Updated for PR #4 on `feature/physics-scene-runtime`.
 
 ## Implemented in the Flutter-owned runtime
 
@@ -8,9 +8,9 @@ Updated for PR #1 on `integration/unify-research-projects`.
 |---|---|---|
 | Hand interaction | Palm-normalized pinch, arming, hysteresis, dwell and tracking-loss reset | Pure Dart tests + CI; camera orientation and hand tracking still require LM-F100 |
 | Shared scene domain | Stable object identity, immutable transforms, two-hand midpoint/scale/angle math, guarded object commands | Pure Dart tests; renderer/AR anchor synchronization is not wired yet |
-| Camera inference reliability | Single-flight frame gate, stale-request recovery and generation invalidation contract | Pure Dart tests; hand camera callback still needs watchdog wiring |
+| Camera inference reliability | Single-flight frame gate, stale-request recovery and generation invalidation contract | Pure Dart tests; hand camera callback still uses its local busy guard pending a callback-correlation-safe watchdog |
 | Performance | Hysteretic high/balanced/low frame-time governor | Pure Dart tests; tier-to-MediaPipe/SplatKit quality mapping remains to be connected |
-| Physics | Bounded fixed-step gravity/integration and impulse API | Pure Dart tests; no collision solver, collider geometry, friction, soft body or scene sync |
+| Physics | Bounded fixed-step AABB collision core for static/dynamic and dynamic/dynamic digital props; positional correction, restitution, friction and input validation | Deterministic Dart tests; not yet synchronized with AR anchors/render transforms; rotated colliders, joints, soft bodies and fluids are not implemented |
 | Capture | Ordered frame manifest with timestamps and 4x4 camera-pose validation | Pure Dart tests; no camera-pose source, SLAM, depth capture, point cloud or reconstruction/export |
 | Voice/commands | Allow-listed typed object commands; delete/duplicate require confirmation | Pure Dart tests; no microphone, ASR model or natural-language inference |
 | Cutout | Existing MediaPipe Interactive Segmenter retained as fallback contract | EdgeSAM model and Android ONNX Runtime are absent; not claimed integrated |
@@ -23,11 +23,11 @@ The repository currently has no EdgeSAM ONNX model artifacts in the app asset tr
 
 ## Required next acceptance gates
 
-1. Run analyze, all tests and debug APK on the latest PR head.
-2. Wire `FrameRequestGate` into the hand camera stream and test callback timeout/recovery.
-3. Integrate EdgeSAM only after model provenance, license, SHA-256 and ONNX Android ABI/runtime are verified; preserve MediaPipe fallback.
-4. Add ARCore depth bridge only after verifying the plugin/native host API and test depth confidence, rotation and crop mapping.
-5. Select and benchmark a native collision engine before replacing the fixed-step motion foundation.
+1. Pass formatting, `flutter analyze`, all tests and Android debug APK build on the latest PR head.
+2. Connect the AABB physics core to the shared scene-object/AR-anchor lifecycle with safe pause/resume and transform synchronization.
+3. Select and benchmark a maintained native 3D physics engine before adding rotated shapes, joints, soft bodies or fluids; keep the Dart AABB solver as a deterministic lightweight fallback.
+4. Integrate EdgeSAM only after model provenance, license, SHA-256 and ONNX Android ABI/runtime are verified; preserve MediaPipe fallback.
+5. Add ARCore depth bridge only after verifying the plugin/native host API and test depth confidence, rotation and crop mapping.
 6. Connect capture manifests to camera pose/depth sources; do not label it reconstruction until a real point-cloud/mesh/splat pipeline exports valid artifacts.
 7. Add speech recognition only with a pinned local model and typed command confirmation.
 8. Probe SplatKit beta.3 on Android and the LG V60; gate all advanced controls on actual capability results.
