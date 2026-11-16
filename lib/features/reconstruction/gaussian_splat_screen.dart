@@ -149,12 +149,12 @@ class _GaussianSplatScreenState extends State<GaussianSplatScreen> {
                               ),
                             ),
                             const SizedBox(height: 20),
-                            Wrap(
+                            const Wrap(
                               spacing: 7,
-                              children: const [
-                                const _FormatTag(label: 'SPZ'),
-                                const _FormatTag(label: 'LODSPLAT'),
-                                const _FormatTag(label: 'VULKAN'),
+                              children: [
+                                _FormatTag(label: 'SPZ'),
+                                _FormatTag(label: 'LODSPLAT'),
+                                _FormatTag(label: 'VULKAN'),
                               ],
                             ),
                           ],
