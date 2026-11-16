@@ -85,11 +85,11 @@ class _BodyRecord {
 
   final String id;
   final _ShapeSpec shape;
-  final int motionType;
+  int motionType;
   Matrix4 transform;
   final double friction;
   final double restitution;
-  final double gravityFactor;
+  double gravityFactor;
   final double mass;
   final int layer;
   final bool sensor;
@@ -102,14 +102,12 @@ class _BodyRecord {
 
 class _JointRecord {
   const _JointRecord({
-    required this.id,
     required this.handle,
     required this.bodyA,
     required this.bodyB,
     required this.kind,
   });
 
-  final String id;
   final int handle;
   final String bodyA;
   final String? bodyB;
@@ -734,9 +732,8 @@ class PhysicsSceneService {
         );
       }
     });
-    record
-      ..transform = Matrix4.copy(transform)
-      ..linearVelocity = Vector3.zero();
+    record.transform = Matrix4.copy(transform);
+    if (resetVelocity) record.linearVelocity = Vector3.zero();
   }
 
   void setLinearVelocity(String id, Vector3 velocity) {
@@ -798,15 +795,28 @@ class PhysicsSceneService {
     _ensureAvailable();
     final record = _bodies[id];
     if (record == null) return;
+    if (record.motionType == jolt.JJ_MOTION_STATIC) {
+      throw StateError('Static bodies cannot be toggled to dynamic/kinematic.');
+    }
     final motionType = kinematic
         ? jolt.JJ_MOTION_KINEMATIC
         : jolt.JJ_MOTION_DYNAMIC;
+    final bodyInterface = _getBodyInterface();
     jolt.JPH_BodyInterface_SetMotionType(
-      _getBodyInterface(),
+      bodyInterface,
       record.handle,
       motionType,
       jolt.JPH_Activation_Activate,
     );
+    final gravityFactor = kinematic ? 0.0 : 1.0;
+    jolt.JPH_BodyInterface_SetGravityFactor(
+      bodyInterface,
+      record.handle,
+      gravityFactor,
+    );
+    record
+      ..motionType = motionType
+      ..gravityFactor = gravityFactor;
   }
 
   void moveKinematic(
@@ -952,7 +962,6 @@ class PhysicsSceneService {
     });
     if (handle == 0) throw StateError('Jolt could not create joint $id.');
     _joints[id] = _JointRecord(
-      id: id,
       handle: handle,
       bodyA: bodyA,
       bodyB: bodyB,
