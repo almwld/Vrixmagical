@@ -6,6 +6,7 @@ import 'package:camera/camera.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 
+import '../../app/app_theme.dart';
 import 'hand_gesture_math.dart';
 
 class HandMirrorScreen extends StatefulWidget {
@@ -229,38 +230,142 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
     final camera = _camera;
     final size = MediaQuery.sizeOf(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('مرآة اليد الرقمية')),
-      body: _error != null
-          ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
-          : Stack(fit: StackFit.expand, children: [
-              if (camera != null && camera.value.isInitialized)
-                CameraPreview(camera)
-              else
-                const ColoredBox(color: Color(0xFF101A29)),
-              if (_indexPosition != null)
-                Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _HandPointPainter(_indexPosition!)))),
-              if (_assetPosition != null)
-                Positioned(
-                  left: (_assetPosition!.dx * size.width - 38).clamp(8.0, size.width - 84),
-                  top: (_assetPosition!.dy * size.height - 110).clamp(90.0, size.height - 190),
-                  child: IgnorePointer(child: _DigitalAsset(isHeld: _pinching)),
+      appBar: AppBar(
+        title: const Text('مرآة اليد الرقمية'),
+        actions: [
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 16),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: (_error == null ? AppColors.success : Colors.redAccent)
+                      .withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(30),
                 ),
-              if (_starting) const Center(child: CircularProgressIndicator()),
-              Positioned(
-                left: 14, right: 14, bottom: 18,
-                child: SafeArea(
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xE6111B2A),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0xFF3DDCCB).withValues(alpha: .35)),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.circle,
+                      size: 6,
+                      color: _error == null ? AppColors.success : Colors.redAccent,
                     ),
-                    child: Text(_status, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _error == null ? 'HAND TRACKING' : 'OFFLINE',
+                      style: TextStyle(
+                        color: _error == null ? AppColors.success : Colors.redAccent,
+                        fontSize: 8,
+                        letterSpacing: .8,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ]),
+            ),
+          ),
+        ],
+      ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (camera != null && camera.value.isInitialized)
+            CameraPreview(camera)
+          else
+            const ColoredBox(
+              color: AppColors.background,
+              child: Center(
+                child: Icon(
+                  Icons.back_hand_outlined,
+                  size: 54,
+                  color: AppColors.muted,
+                ),
+              ),
+            ),
+          if (_indexPosition != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _HandPointPainter(_indexPosition!),
+                ),
+              ),
+            ),
+          if (_assetPosition != null)
+            Positioned(
+              left: (_assetPosition!.dx * size.width - 38)
+                  .clamp(8.0, size.width - 84),
+              top: (_assetPosition!.dy * size.height - 110)
+                  .clamp(90.0, size.height - 190),
+              child: IgnorePointer(
+                child: _DigitalAsset(isHeld: _pinching),
+              ),
+            ),
+          if (_starting)
+            const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          Positioned(
+            left: 16,
+            right: 16,
+            top: 16,
+            child: _TrackingMetric(
+              active: _indexPosition != null,
+              pinching: _pinching,
+            ),
+          ),
+          Positioned(
+            left: 14,
+            right: 14,
+            bottom: 16,
+            child: SafeArea(
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xEE101A28),
+                  borderRadius: BorderRadius.circular(21),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: .3)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x55000000),
+                      blurRadius: 24,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: const Icon(
+                        Icons.touch_app_rounded,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _status,
+                        style: const TextStyle(
+                          color: AppColors.text,
+                          fontSize: 11,
+                          height: 1.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
