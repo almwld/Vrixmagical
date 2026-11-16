@@ -303,10 +303,13 @@ class SceneObjectRegistry {
       case SceneCommandType.move:
         if (command.position == null) return false;
         _objects[object.id] = object.copyWith(position: command.position);
+        return true;
       case SceneCommandType.hide:
         _objects[object.id] = object.copyWith(visible: false);
+        return true;
       case SceneCommandType.show:
         _objects[object.id] = object.copyWith(visible: true);
+        return true;
       case SceneCommandType.duplicate:
         final duplicateId = '${object.id}_copy';
         if (_objects.containsKey(duplicateId)) return false;
@@ -317,10 +320,11 @@ class SceneObjectRegistry {
           scale: object.scale,
           visible: object.visible,
         );
+        return true;
       case SceneCommandType.delete:
         _objects.remove(object.id);
+        return true;
     }
-    return true;
   }
 
   void clear() => _objects.clear();
