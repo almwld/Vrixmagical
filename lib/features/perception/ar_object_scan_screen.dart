@@ -5,6 +5,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter_reality/ar_flutter_plugin.dart';
 import 'package:flutter_reality/datatypes/config_planedetection.dart';
+import 'package:flutter_reality/managers/ar_anchor_manager.dart';
+import 'package:flutter_reality/managers/ar_location_manager.dart';
+import 'package:flutter_reality/managers/ar_object_manager.dart';
 import 'package:flutter_reality/managers/ar_session_manager.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
@@ -33,6 +36,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   int _maskWidth = 1;
   int _maskHeight = 1;
   List<double>? _cameraPose;
+  double? _promptX;
+  double? _promptY;
   final List<Stroke> _strokes = [];
   bool _busy = false;
   bool _saved = false;
@@ -153,6 +158,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     setState(() {
       _busy = true;
       _saved = false;
+      _promptX = x;
+      _promptY = y;
       _strokes.add(stroke);
       _status = 'جارٍ تحديث قناع الجسم محلياً…';
     });
@@ -206,7 +213,9 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final path = _photoPath;
     final mask = _maskImage;
     final pose = _cameraPose;
-    if (_busy || path == null || mask == null || pose == null) return;
+    final promptX = _promptX;
+    final promptY = _promptY;
+    if (_busy || path == null || mask == null || pose == null || promptX == null || promptY == null) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -225,8 +234,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         height: _imageHeight,
         maskWidth: _maskWidth,
         maskHeight: _maskHeight,
-        promptX: .5,
-        promptY: .5,
+        promptX: promptX,
+        promptY: promptY,
         cameraPose: pose,
       ));
       if (mounted) setState(() {
@@ -271,6 +280,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     if (mounted) setState(() {
       _photoPath = null;
       _cameraPose = null;
+      _promptX = null;
+      _promptY = null;
       _strokes.clear();
       _saved = false;
       _status = 'عد إلى عرض AR ثم التقط منظوراً جديداً.';
