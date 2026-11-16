@@ -1117,6 +1117,136 @@ class PhysicsSceneService {
     });
   }
 
+  List<PhysicsRaycastHit> overlapBox(
+    Matrix4 worldTransform,
+    Vector3 halfExtents, {
+    int layerMask = 0xFFFF,
+    String? ignoreBodyId,
+    bool includeSensors = true,
+    int maxHits = 64,
+  }) {
+    _ensureAvailable();
+    if (maxHits < 1 || maxHits > 4096 || layerMask < 0 || layerMask > 0xFFFF) {
+      throw ArgumentError('Invalid overlap query limits.');
+    }
+    final shapeSpec = _boxSpec(halfExtents);
+    final pose = _toPose(worldTransform);
+    final ignored = _resolveIgnoredBody(ignoreBodyId);
+    return using((arena) {
+      final shape = _createShape(arena, shapeSpec);
+      if (shape.address == 0) throw StateError('Jolt could not create query box.');
+      try {
+        final poseBuffer = _poseBuffer(arena, pose);
+        final hits = arena<jolt.JJ_Hit>(maxHits);
+        var flags = jolt.JJ_QUERY_ALL_HITS;
+        if (includeSensors) flags |= jolt.JJ_QUERY_SENSORS;
+        final count = jolt.jj_overlap(
+          _world,
+          shape,
+          poseBuffer,
+          layerMask,
+          ignored,
+          flags,
+          hits,
+          maxHits,
+        );
+        if (count < 0) throw StateError('Jolt overlap query failed: $count');
+        return _mapHits(hits, count);
+      } finally {
+        jolt.jj_shape_release(shape.cast<Void>());
+      }
+    });
+  }
+
+  List<PhysicsRaycastHit> shapeCastBox(
+    Matrix4 startTransform,
+    Vector3 halfExtents,
+    Vector3 direction, {
+    int layerMask = 0xFFFF,
+    String? ignoreBodyId,
+    bool includeSensors = true,
+    bool allHits = true,
+    int maxHits = 64,
+  }) {
+    _ensureAvailable();
+    if (!_isFiniteVector(direction) ||
+        direction.length2 < 1e-8 ||
+        maxHits < 1 ||
+        maxHits > 4096 ||
+        layerMask < 0 ||
+        layerMask > 0xFFFF) {
+      throw ArgumentError('Invalid shape-cast arguments.');
+    }
+    final shapeSpec = _boxSpec(halfExtents);
+    final pose = _toPose(startTransform);
+    final ignored = _resolveIgnoredBody(ignoreBodyId);
+    return using((arena) {
+      final shape = _createShape(arena, shapeSpec);
+      if (shape.address == 0) throw StateError('Jolt could not create cast box.');
+      try {
+        final poseBuffer = _poseBuffer(arena, pose);
+        final castDirection = arena<Float>(3);
+        _writeVector(castDirection, direction);
+        final hits = arena<jolt.JJ_Hit>(maxHits);
+        var flags = 0;
+        if (allHits) flags |= jolt.JJ_QUERY_ALL_HITS;
+        if (includeSensors) flags |= jolt.JJ_QUERY_SENSORS;
+        final count = jolt.jj_shape_cast(
+          _world,
+          shape,
+          poseBuffer,
+          castDirection,
+          layerMask,
+          ignored,
+          flags,
+          hits,
+          maxHits,
+        );
+        if (count < 0) throw StateError('Jolt shape cast failed: $count');
+        return _mapHits(hits, count);
+      } finally {
+        jolt.jj_shape_release(shape.cast<Void>());
+      }
+    });
+  }
+
+  int _resolveIgnoredBody(String? id) {
+    if (id == null) return 0;
+    final record = _bodies[id];
+    if (record == null) throw ArgumentError.value(id, 'ignoreBodyId');
+    return record.handle;
+  }
+
+  Pointer<Float> _poseBuffer(
+    Arena arena,
+    ({List<double> position, List<double> rotation}) pose,
+  ) {
+    final buffer = arena<Float>(7);
+    for (var i = 0; i < 3; i++) {
+      buffer[i] = pose.position[i];
+    }
+    for (var i = 0; i < 4; i++) {
+      buffer[i + 3] = pose.rotation[i];
+    }
+    return buffer;
+  }
+
+  List<PhysicsRaycastHit> _mapHits(
+    Pointer<jolt.JJ_Hit> hits,
+    int count,
+  ) {
+    return List<PhysicsRaycastHit>.generate(count, (index) {
+      final hit = hits[index];
+      return PhysicsRaycastHit(
+        bodyId: _bodyIdsByHandle[hit.body],
+        point: Vector3(hit.point[0], hit.point[1], hit.point[2]),
+        normal: Vector3(hit.normal[0], hit.normal[1], hit.normal[2]),
+        fraction: hit.fraction,
+        depth: hit.depth,
+      );
+    });
+  }
+
   void removeBody(String id) {
     if (_disposed) return;
     final record = _bodies.remove(id);
