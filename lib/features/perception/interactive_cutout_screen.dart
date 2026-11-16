@@ -31,6 +31,7 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
   ObjectScanStore? _scanStore;
   double? _promptX;
   double? _promptY;
+  bool _currentViewSaved = false;
 
   @override
   void initState() {
@@ -132,7 +133,7 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
     ];
     setState(() {
       _busy = true;
-      if (!_excludeMode) { _promptX = x; _promptY = y; }
+      if (!_excludeMode) { _promptX = x; _promptY = y; _currentViewSaved = false; }
       _status = _excludeMode ? 'جارٍ إزالة المنطقة المحددة من القناع…' : 'جارٍ عزل الجسم محلياً…';
       _strokes.add(Stroke(
         brushMode: _excludeMode ? BrushMode.negative : BrushMode.positive,
@@ -213,8 +214,8 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
         promptX: x,
         promptY: y,
       ));
-      if (mounted) setState(() => _status =
-        'حُفظ المنظور ${session.viewCount}. أدر الهاتف حول الجسم والتقط زاوية مختلفة.');
+      if (mounted) setState(() { _currentViewSaved = true; _status =
+        'حُفظ المنظور ${session.viewCount}. أدر الهاتف حول الجسم والتقط زاوية مختلفة.'; });
     } catch (error) {
       if (mounted) setState(() { _error = error.toString(); _status = 'تعذّر حفظ هذا المنظور.'; });
     } finally {
@@ -272,6 +273,7 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
         _photoPath = null;
         _promptX = null;
         _promptY = null;
+        _currentViewSaved = false;
         _strokes.clear();
         _error = null;
         _status = 'أعد توجيه الكاميرا إلى الجسم ثم التقط صورة.';
@@ -493,9 +495,9 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
                   SizedBox(
                     height: 46,
                     child: FilledButton.icon(
-                      onPressed: _busy ? null : _saveCurrentView,
+                      onPressed: _busy || _currentViewSaved ? null : _saveCurrentView,
                       icon: const Icon(Icons.add_a_photo_outlined),
-                      label: const Text('حفظ هذا المنظور للمسح'),
+                      label: Text(_currentViewSaved ? 'تم حفظ هذا المنظور' : 'حفظ هذا المنظور للمسح'),
                     ),
                   ),
                   if ((_scanStore?.viewCount ?? 0) >= 3) ...[
