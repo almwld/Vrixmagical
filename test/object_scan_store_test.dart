@@ -43,7 +43,7 @@ void main() {
       expect(text, contains('"captureKind":"masked-multiview-rgb"'));
       expect(text, contains('"viewCount":2'));
       expect(text, contains('"maskWidth":256'));
-      expect(text, contains('column-major-world-from-camera-meters'));
+      expect(text, contains('column-major-world-from-camera-meters'));\n      expect(text, contains('unverified-unsynchronized'));\n      expect(text, contains('"cameraPose":null'));\n      expect(text, contains('"schemaVersion":2'));
       expect(await File('${store.directory.path}/view_001.jpg').exists(), isTrue);
       expect(await File('${store.directory.path}/mask_001.png').exists(), isTrue);
     });
