@@ -32,10 +32,14 @@ class ScenePerceptionService {
     try {
       final detections = await detector.detect(image);
       final segmentation = await segmenter.segment(image);
-      final labels = <String>{
-        for (final detection in detections.detections)
-          if (detection.categories.isNotEmpty) detection.categories.first.categoryName,
-      }.toList()..sort();
+      final labelSet = <String>{};
+      for (final detection in detections.detections) {
+        if (detection.categories.isNotEmpty) {
+          final name = detection.categories.first.categoryName;
+          if (name != null && name.isNotEmpty) labelSet.add(name);
+        }
+      }
+      final labels = labelSet.toList()..sort();
       final mask = segmentation.categoryMask;
       return ScenePerceptionResult(
         labels: labels,

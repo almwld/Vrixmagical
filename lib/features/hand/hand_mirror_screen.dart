@@ -99,10 +99,10 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
           width: image.width,
           height: image.height,
           format: VisionPixelFormat.rgba,
-          rotationDegrees: rotation,
         ),
       ),
       timestampMilliseconds: _lastTimestamp,
+      rotationDegrees: rotation,
     );
   }
 
