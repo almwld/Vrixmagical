@@ -152,9 +152,9 @@ class _GaussianSplatScreenState extends State<GaussianSplatScreen> {
                             Wrap(
                               spacing: 7,
                               children: const [
-                                _FormatTag(label: 'SPZ'),
-                                _FormatTag(label: 'LODSPLAT'),
-                                _FormatTag(label: 'VULKAN'),
+                                const _FormatTag(label: 'SPZ'),
+                                const _FormatTag(label: 'LODSPLAT'),
+                                const _FormatTag(label: 'VULKAN'),
                               ],
                             ),
                           ],
