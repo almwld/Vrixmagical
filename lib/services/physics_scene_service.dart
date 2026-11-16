@@ -850,7 +850,7 @@ class PhysicsSceneService {
     using((arena) {
       final position = arena<jolt.JPH_Vec3>();
       final rotation = arena<jolt.JPH_Quat>();
-      _writeVector(position, Vector3(
+      _writeJoltVector(position, Vector3(
         pose.position[0],
         pose.position[1],
         pose.position[2],
