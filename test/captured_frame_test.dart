@@ -106,7 +106,7 @@ void main() {
       expect(points.first.z, closeTo(-1, 1e-6));
     });
 
-    test('rejects masks that do not match RGB dimensions', () {
+    test('drops low-confidence depth samples before point-cloud fusion', () {\n      final captured = frame();\n      captured.depth!.confidence[0] = 10;\n      final points = const MaskedPointCloudBuilder().build(\n        frame: captured,\n        rgbMask: Uint8List(16)..fillRange(0, 16, 255),\n        pixelStride: 1,\n        minimumConfidence: .5,\n      );\n      expect(points.length, 3);\n    });\n\n    test('rejects masks that do not match RGB dimensions', () {
       expect(
         () => const MaskedPointCloudBuilder().build(
           frame: frame(),
