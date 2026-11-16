@@ -41,6 +41,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   final List<Stroke> _strokes = [];
   bool _busy = false;
   bool _saved = false;
+  bool _completed = false;
   String _status = 'حرّك الهاتف ببطء حتى يستقر تتبع ARCore، ثم التقط المنظور الأول.';
   String? _error;
 
@@ -79,7 +80,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
 
   Future<void> _captureView() async {
     final session = _session;
-    if (_busy || session == null) return;
+    if (_busy || _completed || session == null) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -153,7 +154,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final y = ((position.dy - rect.top) / rect.height).clamp(0.0, 1.0);
     final stroke = Stroke(
       brushMode: BrushMode.positive,
-      points: [NormalizedKeypoint(x: x, y: y)],
+      points: [
+        NormalizedKeypoint(x: (x - .008).clamp(0.0, 1.0), y: y),
+        NormalizedKeypoint(x: (x + .008).clamp(0.0, 1.0), y: y),
+      ],
     );
     setState(() {
       _busy = true;
@@ -261,8 +265,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     });
     try {
       final result = await store.complete();
-      if (mounted) setState(() => _status =
-          'اكتمل التقاط ${result.viewCount} مناظير مع وضعيات ARCore. العمق وإعادة البناء لم يبدآ بعد.');
+      if (mounted) setState(() {
+        _completed = true;
+        _status = 'اكتمل التقاط ${result.viewCount} مناظير مع وضعيات ARCore. العمق وإعادة البناء لم يبدآ بعد.';
+      });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -358,9 +364,9 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                   const SizedBox(height: 10),
                   if (_photoPath == null)
                     FilledButton.icon(
-                      onPressed: _busy ? null : _captureView,
+                      onPressed: _busy || _completed ? null : _captureView,
                       icon: const Icon(Icons.camera_alt_outlined),
-                      label: const Text('التقاط منظور AR'),
+                      label: Text(_completed ? 'اكتملت جلسة المسح' : 'التقاط منظور AR'),
                     )
                   else ...[
                     FilledButton.icon(
@@ -377,7 +383,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                             label: const Text('العودة إلى AR'),
                           ),
                         ),
-                        if ((_store?.viewCount ?? 0) >= 3) ...[
+                        if ((_store?.viewCount ?? 0) >= 3 && !_completed) ...[
                           const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton.icon(
