@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="vrix-teal" x1="178" y1="160" x2="832" y2="850" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#20C5C0"/>
+      <stop offset="0.52" stop-color="#0A9B96"/>
+      <stop offset="1" stop-color="#08766F"/>
+    </linearGradient>
+    <linearGradient id="vrix-cyan" x1="300" y1="190" x2="760" y2="790" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#72F0E5"/>
+      <stop offset="1" stop-color="#20AFC0"/>
+    </linearGradient>
+    <linearGradient id="vrix-dark" x1="160" y1="120" x2="860" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1A2C40"/>
+      <stop offset="1" stop-color="#0B1524"/>
+    </linearGradient>
+    <clipPath id="icon-clip">
+      <rect x="72" y="72" width="880" height="880" rx="224"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#icon-clip)">
+    <rect x="72" y="72" width="880" height="880" rx="224" fill="url(#vrix-dark)"/>
+    <path d="M72 760C240 660 334 690 490 788C630 876 782 884 952 782V952H72V760Z" fill="#102638" opacity=".72"/>
+    <path d="M260 270L510 690L760 270" stroke="url(#vrix-teal)" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M320 738L512 520L704 738" stroke="url(#vrix-cyan)" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M348 300L512 476L676 300" stroke="#D5FFFA" stroke-opacity=".92" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M512 476V690" stroke="#D5FFFA" stroke-opacity=".9" stroke-width="38" stroke-linecap="round"/>
+    <circle cx="512" cy="512" r="48" fill="#D5FFFA"/>
+    <circle cx="512" cy="512" r="20" fill="#0A8F89"/>
+  </g>
+</svg>
