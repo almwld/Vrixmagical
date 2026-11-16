@@ -142,6 +142,32 @@ void main() {
       expect(physics.jointCount, 0);
     });
 
+    test('supports dynamic convex hulls and static triangle meshes', () {
+      physics.addDynamicConvexHull(
+        id: 'tetra',
+        worldTransform: Matrix4.identity()
+          ..setTranslation(Vector3(0, 2, 0)),
+        vertices: <Vector3>[
+          Vector3(0, 0.2, 0),
+          Vector3(-0.2, -0.2, 0.2),
+          Vector3(0.2, -0.2, 0.2),
+          Vector3(0, -0.2, -0.2),
+        ],
+      );
+      physics.addStaticMesh(
+        id: 'mesh-floor',
+        worldTransform: Matrix4.identity(),
+        vertices: <Vector3>[
+          Vector3(-1, 0, -1),
+          Vector3(1, 0, -1),
+          Vector3(1, 0, 1),
+          Vector3(-1, 0, 1),
+        ],
+        triangleIndices: <int>[0, 2, 1, 0, 3, 2],
+      );
+      expect(physics.bodyCount, 2);
+    });
+
     test('bounds fixed-step catch-up after long frames', () {
       expect(physics.advance(1 / 30), 2);
       expect(physics.advance(10), 5);
