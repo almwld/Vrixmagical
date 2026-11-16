@@ -178,6 +178,17 @@ void main() {
       expect(fused.first.x, closeTo(.0025, 1e-6));
     });
 
+    test('enforces the point-cloud output limit while accumulating', () {
+      expect(
+        () => const PointCloudVoxelFusion().downsample(
+          [Vector3(0, 0, 0), Vector3(1, 0, 0)],
+          voxelSizeMeters: .01,
+          maximumOutputPoints: 1,
+        ),
+        throwsStateError,
+      );
+    });
+
     test('rejects masks that do not match RGB dimensions', () {
       expect(
         () => const MaskedPointCloudBuilder().build(
