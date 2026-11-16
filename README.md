@@ -26,7 +26,7 @@ The AR scene and hand-mirror experience are separate modes. ARCore/ARKit owns th
 | SplatKit Android / Vulkan | Gaussian Splat rendering of SPZ and LODSPLAT worlds | Integrated native Android PlatformView; arm64/Vulkan device validation pending |
 | EdgeSAM / SAM 2 | Promptable object cut-outs | Research/source reference only; not yet integrated into Android runtime |
 | Depth Anything / AR depth | Metric depth and occlusion | Not yet integrated; ARCore depth support varies by device |
-| Gaussian Splatting / NeRF | Reconstructed scene rendering | Source reference exists under `splatkit/`; Flutter renderer not yet integrated |
+| NeRF | Alternative scene reconstruction pipeline | Research reference only; not integrated |
 | Physics / fluids | Digital rigid bodies, soft bodies and fluids | Not yet integrated in Flutter runtime |
 | Voice / vision-language model | Natural-language scene commands | Not yet integrated |
 
@@ -48,11 +48,11 @@ No model is silently downloaded at first launch. The explicit bundling step retr
 
 ## Android platform bootstrap
 
-The initial Flutter commit did not include generated Android platform files. Create them once with:
+The initial Flutter commit did not include generated Android platform files. Create and configure the Android host once with:
 
-    flutter create --platforms=android --org com.virxmagical .
+    bash tool/bootstrap_android.sh
 
-Then set Android minSdk to 28 or higher for the AR plugin. Build and test on a physical ARCore-certified phone with Google Play Services for AR installed. Emulators can run unit tests but cannot validate camera tracking or AR.
+This generates the Flutter Android host and configures compileSdk 36, minSdk 29, arm64-v8a and the native SplatKit Vulkan dependency. Build and test on a physical ARCore-certified Android phone with Google Play Services for AR installed. The Gaussian Splat viewer additionally requires Vulkan 1.1. Emulators can run unit tests but cannot validate camera tracking, AR or Vulkan rendering.
 
 ## Privacy
 

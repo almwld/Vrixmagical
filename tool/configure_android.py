@@ -86,10 +86,21 @@ class SplatKitViewFactory : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
 
 internal object SplatKitViewRegistry {
     private val views = CopyOnWriteArraySet<SplatSurfaceView>()
-    fun add(view: SplatSurfaceView) { views.add(view) }
+    @Volatile private var hostResumed = false
+
+    fun add(view: SplatSurfaceView) {
+        views.add(view)
+        if (hostResumed) view.resume()
+    }
     fun remove(view: SplatSurfaceView) { views.remove(view) }
-    fun resumeAll() { views.forEach { it.resume() } }
-    fun pauseAll() { views.forEach { it.pause() } }
+    fun resumeAll() {
+        hostResumed = true
+        views.forEach { it.resume() }
+    }
+    fun pauseAll() {
+        hostResumed = false
+        views.forEach { it.pause() }
+    }
 }
 
 private class SplatKitPlatformView(
