@@ -120,8 +120,10 @@ class CapturedFrame {
       throw const FormatException('RGB payload and positive frame timestamp are required.');
     }
     rgbIntrinsics.validate();
-    if (imageRotationDegrees % 90 != 0) {
-      throw const FormatException('Image rotation must be a multiple of 90 degrees.');
+    if (imageRotationDegrees != 0) {
+      throw const FormatException(
+        'Rotated RGB frames require an explicit RGB/depth registration transform.',
+      );
     }
     _validateRigidPose(cameraPose);
     if (trackingState != VrixTrackingState.tracking) {
@@ -292,5 +294,90 @@ class MaskedPointCloudBuilder {
       }
     }
     return points;
+  }
+}
+
+
+/// Resizes a segmentation mask to the RGB image grid using nearest-neighbor
+/// sampling. This preserves binary mask edges and avoids inventing confidence.
+class SegmentationMaskAligner {
+  const SegmentationMaskAligner();
+
+  Uint8List alignNearestNeighbor({
+    required Uint8List mask,
+    required int maskWidth,
+    required int maskHeight,
+    required int rgbWidth,
+    required int rgbHeight,
+  }) {
+    if (maskWidth <= 0 ||
+        maskHeight <= 0 ||
+        rgbWidth <= 0 ||
+        rgbHeight <= 0 ||
+        mask.length != maskWidth * maskHeight) {
+      throw const FormatException('Segmentation mask dimensions or buffer are invalid.');
+    }
+    final aligned = Uint8List(rgbWidth * rgbHeight);
+    for (var y = 0; y < rgbHeight; y++) {
+      final sourceY = ((y + .5) * maskHeight / rgbHeight).floor();
+      for (var x = 0; x < rgbWidth; x++) {
+        final sourceX = ((x + .5) * maskWidth / rgbWidth).floor();
+        aligned[y * rgbWidth + x] =
+            mask[sourceY * maskWidth + sourceX];
+      }
+    }
+    return aligned;
+  }
+}
+
+class _VoxelAccumulator {
+  double x = 0;
+  double y = 0;
+  double z = 0;
+  int count = 0;
+
+  void add(Vector3 point) {
+    x += point.x;
+    y += point.y;
+    z += point.z;
+    count++;
+  }
+
+  Vector3 get centroid => Vector3(x / count, y / count, z / count);
+}
+
+/// Deterministic world-space voxel fusion for bounded multi-view point clouds.
+/// It reduces duplicate samples; it is not a surface reconstruction algorithm.
+class PointCloudVoxelFusion {
+  const PointCloudVoxelFusion();
+
+  List<Vector3> downsample(
+    Iterable<Vector3> points, {
+    double voxelSizeMeters = 0.01,
+    int maximumOutputPoints = 500000,
+  }) {
+    if (!voxelSizeMeters.isFinite ||
+        voxelSizeMeters <= 0 ||
+        maximumOutputPoints < 1) {
+      throw const FormatException('Voxel fusion limits are invalid.');
+    }
+    final voxels = <(int, int, int), _VoxelAccumulator>{};
+    for (final point in points) {
+      if (!point.x.isFinite || !point.y.isFinite || !point.z.isFinite) {
+        continue;
+      }
+      final key = (
+        (point.x / voxelSizeMeters).floor(),
+        (point.y / voxelSizeMeters).floor(),
+        (point.z / voxelSizeMeters).floor(),
+      );
+      (voxels[key] ??= _VoxelAccumulator()).add(point);
+    }
+    if (voxels.length > maximumOutputPoints) {
+      throw StateError(
+        'Point cloud exceeds the configured output limit; increase voxel size or reduce capture density.',
+      );
+    }
+    return voxels.values.map((voxel) => voxel.centroid).toList(growable: false);
   }
 }
