@@ -142,8 +142,8 @@ class PhysicsSceneService {
         ..gravity[1] = -9.81
         ..gravity[2] = 0
         ..maxBodies = maxBodies
-        ..maxBodyPairs = math.max(8192, maxBodies * 16)
-        ..maxContactConstraints = math.max(4096, maxBodies * 8)
+        ..maxBodyPairs = math.max(8192, maxBodies * 16).toInt()
+        ..maxContactConstraints = math.max(4096, maxBodies * 8).toInt()
         ..tempAllocatorBytes = 8 * 1024 * 1024
         ..reportActivation = true
         ..reportContactStay = false
@@ -426,7 +426,7 @@ class PhysicsSceneService {
           0.05,
           math.min(spec.values[0], math.min(spec.values[1], spec.values[2])) *
               0.2,
-        );
+        ).toDouble();
         return jolt.JPH_BoxShape_Create(half, convexRadius).cast();
       case _ShapeKind.sphere:
         return jolt.JPH_SphereShape_Create(spec.values[0]).cast();
@@ -447,7 +447,7 @@ class PhysicsSceneService {
     _accumulator += math.min(
       frameDeltaSeconds,
       fixedStepSeconds * maxSubSteps,
-    );
+    ).toDouble();
     var steps = 0;
     while (_accumulator >= fixedStepSeconds && steps < maxSubSteps) {
       final result = jolt.jj_world_step(_world, fixedStepSeconds, collisionSteps);
@@ -656,8 +656,10 @@ class PhysicsSceneService {
         ..springDamping = springDamping;
       _writeVector(settings.ref.pointA, pointA);
       _writeVector(settings.ref.pointB, pointB);
-      _writeVector(settings.ref.axis, axis.normalized());
-      _writeVector(settings.ref.normal, normal.normalized());
+      final normalizedAxis = Vector3.copy(axis)..normalize();
+      final normalizedNormal = Vector3.copy(normal)..normalize();
+      _writeVector(settings.ref.axis, normalizedAxis);
+      _writeVector(settings.ref.normal, normalizedNormal);
       return jolt.jj_joint_create(_world, a.handle, b?.handle ?? 0, settings);
     });
     if (handle == 0) throw StateError('Jolt could not create joint $id.');
@@ -705,7 +707,7 @@ class PhysicsSceneService {
     _ensureAvailable();
     if (maxEvents < 1) throw ArgumentError.value(maxEvents, 'maxEvents');
     final events = <PhysicsContactEvent>[];
-    var remaining = math.min(jolt.jj_pending_events(_world), maxEvents);
+    var remaining = math.min(jolt.jj_pending_events(_world), maxEvents).toInt();
     while (remaining > 0) {
       final drained = using((arena) {
         final buffer = arena<jolt.JJ_Event>(remaining);
@@ -737,7 +739,7 @@ class PhysicsSceneService {
       remaining = math.min(
         jolt.jj_pending_events(_world),
         maxEvents - events.length,
-      );
+      ).toInt();
     }
     return events;
   }
