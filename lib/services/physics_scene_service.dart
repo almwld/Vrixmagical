@@ -1184,12 +1184,6 @@ class PhysicsSceneService {
     );
   }
 
-  void _writeVector(Array<Float> target, Vector3 value) {
-    target[0] = value.x;
-    target[1] = value.y;
-    target[2] = value.z;
-  }
-
   void _writeVector(Pointer<Float> target, Vector3 value) {
     target[0] = value.x;
     target[1] = value.y;
