@@ -150,9 +150,11 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       physics.advance(
         now.difference(previous).inMicroseconds / Duration.microsecondsPerSecond,
       );
+      final activeTransforms = physics.activeBodyTransforms();
       for (final asset in _placed) {
         if (_manuallyControlledNodes.contains(asset.node.name)) continue;
-        final worldTransform = physics.bodyWorldTransform(asset.bodyId);
+        final worldTransform = activeTransforms[asset.bodyId];
+        if (worldTransform == null) continue;
         final anchorInverse = Matrix4.copy(asset.anchorWorldTransform)..invert();
         final localTransform = anchorInverse..multiply(worldTransform);
         asset.node.transform = Matrix4.compose(
