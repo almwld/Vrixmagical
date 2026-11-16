@@ -8,7 +8,8 @@ VirxMagical is an Android-first Flutter application for interactive digital repr
 - **AR scene:** native ARCore/ARKit session through `flutter_reality`, horizontal/vertical plane detection, tap hit-testing, anchor creation, GLB sample placement, drag/rotate and remove.
 - **Hand mirror:** camera preview plus Google's MediaPipe Hand Landmarker in live-stream mode. A pinch grabs and moves a digital overlay; the physical source object is never modified.
 - **Scene analysis:** on-device MediaPipe Object Detector and Image Segmenter on a captured frame.
-- **Unit tests:** normalized pinch-distance logic.
+- **Physics core:** deterministic fixed-step AABB collision solver for digital props is being integrated; renderer/AR-anchor synchronization and hardware validation remain pending.
+- **Unit tests:** normalized pinch-distance, scene-runtime and deterministic physics behavior.
 
 ## Camera ownership
 
@@ -27,8 +28,8 @@ The AR scene and hand-mirror experience are separate modes. ARCore/ARKit owns th
 | EdgeSAM / SAM 2 | Promptable object cut-outs | Research/source reference only; not yet integrated into Android runtime |
 | Depth Anything / AR depth | Metric depth and occlusion | Not yet integrated; ARCore depth support varies by device |
 | NeRF | Alternative scene reconstruction pipeline | Research reference only; not integrated |
-| Physics / fluids | Digital rigid bodies, soft bodies and fluids | Not yet integrated in Flutter runtime |
-| Voice / vision-language model | Natural-language scene commands | Not yet integrated |
+| Physics / fluids | Fixed-step AABB rigid-body collision core for digital props; no soft-body/fluid simulation | Core implementation under PR review; not yet connected to AR scene transforms |
+| Voice / vision-language model | Natural-language scene commands | Typed allow-listed command contract exists; speech recognition/model runtime not integrated |
 
 SplatKit Android is pinned to the published Maven Central artifact `io.github.xget7:splatkit-android:0.1.0-beta.3`. It requires Android 10/API 29+, arm64-v8a and Vulkan 1.1. Import a prepared `.spz` or `.lodsplat` file from the scene viewer. PLY reconstruction/preprocessing is an offline workflow; convert PLY with the SplatKit `prepare-world.sh` tooling before importing. Splat clouds are visual geometry and are not automatically collision-ready meshes.
 
