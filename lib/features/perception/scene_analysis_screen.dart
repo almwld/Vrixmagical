@@ -117,7 +117,7 @@ class _SceneAnalysisScreenState extends State<SceneAnalysisScreen> {
                           ? 'تحقق من إذن الكاميرا ثم أعد فتح الأداة.'
                           : 'جارٍ تهيئة الكاميرا الخلفية…',
                     ),
-                  Positioned(
+                  const Positioned(
                     top: 14,
                     left: 14,
                     child: _OverlayTag(
@@ -126,9 +126,9 @@ class _SceneAnalysisScreenState extends State<SceneAnalysisScreen> {
                     ),
                   ),
                   if (_busy)
-                    ColoredBox(
-                      color: const Color(0x99080D16),
-                      child: const Center(
+                    const ColoredBox(
+                      color: Color(0x99080D16),
+                      child: Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -142,7 +142,7 @@ class _SceneAnalysisScreenState extends State<SceneAnalysisScreen> {
                         ),
                       ),
                     ),
-                  Positioned(
+                  const Positioned(
                     right: 14,
                     bottom: 14,
                     child: _OverlayTag(
