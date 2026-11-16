@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 
 import '../../app/app_theme.dart';
+import '../../services/object_scan_store.dart';
 
 class InteractiveCutoutScreen extends StatefulWidget {
   const InteractiveCutoutScreen({super.key});
@@ -27,6 +28,9 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
   bool _excludeMode = false;
   String _status = 'التقط صورة ثم المس الجسم الذي تريد عزله.';
   String? _error;
+  ObjectScanStore? _scanStore;
+  double? _promptX;
+  double? _promptY;
 
   @override
   void initState() {
@@ -128,6 +132,7 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
     ];
     setState(() {
       _busy = true;
+      if (!_excludeMode) { _promptX = x; _promptY = y; }
       _status = _excludeMode ? 'جارٍ إزالة المنطقة المحددة من القناع…' : 'جارٍ عزل الجسم محلياً…';
       _strokes.add(Stroke(
         brushMode: _excludeMode ? BrushMode.negative : BrushMode.positive,
@@ -183,6 +188,55 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
     }
   }
 
+
+  Future<void> _saveCurrentView() async {
+    final photoPath = _photoPath;
+    final mask = _maskImage;
+    final x = _promptX;
+    final y = _promptY;
+    if (_busy || photoPath == null || mask == null || x == null || y == null) {
+      setState(() => _status = 'حدد الجسم أولاً حتى يمكن حفظ هذا المنظور.');
+      return;
+    }
+    setState(() { _busy = true; _error = null; _status = 'جارٍ حفظ الصورة والقناع ضمن جلسة المسح…'; });
+    try {
+      final png = await mask.toByteData(format: ui.ImageByteFormat.png);
+      if (png == null) throw StateError('تعذّر ترميز قناع الجسم بصيغة PNG.');
+      final session = _scanStore ??= await ObjectScanStore.create(
+        displayName: 'VRIX scanned object',
+      );
+      await session.addView(ObjectScanView(
+        imageFile: File(photoPath),
+        maskPng: png.buffer.asUint8List(png.offsetInBytes, png.lengthInBytes),
+        width: _imageWidth,
+        height: _imageHeight,
+        promptX: x,
+        promptY: y,
+      ));
+      if (mounted) setState(() => _status =
+        'حُفظ المنظور ${session.viewCount}. أدر الهاتف حول الجسم والتقط زاوية مختلفة.');
+    } catch (error) {
+      if (mounted) setState(() { _error = error.toString(); _status = 'تعذّر حفظ هذا المنظور.'; });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _finishScan() async {
+    final session = _scanStore;
+    if (_busy || session == null) return;
+    setState(() { _busy = true; _error = null; _status = 'جارٍ إغلاق جلسة المسح وحفظ manifest…'; });
+    try {
+      final completed = await session.complete();
+      if (mounted) setState(() => _status =
+        'اكتمل التقاط ${completed.viewCount} مناظير. حُفظت الصور والأقنعة في: ${completed.directory.path}. إعادة البناء ثلاثي الأبعاد لم تبدأ بعد.');
+    } catch (error) {
+      if (mounted) setState(() { _error = error.toString(); _status = 'يلزم التقاط ثلاثة مناظير مختلفة على الأقل.'; });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _resetSelection() async {
     final segmenter = _segmenter;
     final path = _photoPath;
@@ -216,6 +270,8 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
     if (mounted) {
       setState(() {
         _photoPath = null;
+        _promptX = null;
+        _promptY = null;
         _strokes.clear();
         _error = null;
         _status = 'أعد توجيه الكاميرا إلى الجسم ثم التقط صورة.';
@@ -424,6 +480,33 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
                     height: 1.6,
                   ),
                 ),
+                if (_scanStore != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'مناظير محفوظة: ${_scanStore!.viewCount}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.success, fontSize: 10, fontWeight: FontWeight.w800),
+                  ),
+                ],
+                if (photoPath != null && _maskImage != null) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 46,
+                    child: FilledButton.icon(
+                      onPressed: _busy ? null : _saveCurrentView,
+                      icon: const Icon(Icons.add_a_photo_outlined),
+                      label: const Text('حفظ هذا المنظور للمسح'),
+                    ),
+                  ),
+                  if ((_scanStore?.viewCount ?? 0) >= 3) ...[
+                    const SizedBox(height: 7),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _finishScan,
+                      icon: const Icon(Icons.check_circle_outline_rounded),
+                      label: const Text('إنهاء جلسة المسح'),
+                    ),
+                  ],
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 6),
                   Text(
