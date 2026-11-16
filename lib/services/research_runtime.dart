@@ -211,8 +211,11 @@ class FixedStepPhysics {
   Iterable<Collider> get colliders => List.unmodifiable(_colliders.values);
 
   void addBody(PhysicsBody body) {
-    if (body.objectId.isEmpty || !body.mass.isFinite || body.mass <= 0) {
-      throw ArgumentError('A physics body needs a stable id and positive finite mass.');
+    if (body.objectId.trim().isEmpty ||
+        !_isFiniteVec3(body.position) ||
+        !_isFiniteVec3(body.velocity) ||
+        !body.mass.isFinite || body.mass <= 0) {
+      throw ArgumentError('A physics body needs a stable id, finite transforms and positive finite mass.');
     }
     _bodies[body.objectId] = body;
   }
@@ -226,8 +229,8 @@ class FixedStepPhysics {
         !extents.x.isFinite || !extents.y.isFinite || !extents.z.isFinite ||
         extents.x <= 0 || extents.y <= 0 || extents.z <= 0 ||
         !collider.restitution.isFinite || collider.restitution < 0 || collider.restitution > 1 ||
-        !collider.friction.isFinite || collider.friction < 0) {
-      throw ArgumentError('Collider dimensions and material values are invalid.');
+        !collider.friction.isFinite || collider.friction < 0 || collider.friction > 1) {
+      throw ArgumentError('Collider dimensions and material coefficients must be finite and within their physical ranges.');
     }
     _colliders[collider.objectId] = collider;
   }
@@ -343,6 +346,9 @@ class FixedStepPhysics {
   double _dot(Vec3 a, Vec3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
 
   void applyImpulse(String objectId, Vec3 impulse) {
+    if (!_isFiniteVec3(impulse)) {
+      throw ArgumentError.value(impulse, 'impulse', 'Impulse components must be finite.');
+    }
     final body = _bodies[objectId];
     if (body == null || (_colliders[objectId]?.isStatic ?? false)) return;
     body.velocity = body.velocity + impulse * (1 / body.mass);
