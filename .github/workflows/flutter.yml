@@ -26,6 +26,11 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Verify native SplatKit dependency
+        run: |
+          cd android
+          ./gradlew :app:dependencyInsight --dependency splatkit-android --configuration debugCompileClasspath
+
       - name: Bundle pinned MediaPipe models
         run: dart run mediapipe_core:bundle_models
 
