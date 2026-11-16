@@ -55,6 +55,9 @@ class Vec3 {
   static Vec3 lerp(Vec3 a, Vec3 b, double t) => a + (b - a) * t;
 }
 
+bool _isFiniteVec3(Vec3 value) =>
+    value.x.isFinite && value.y.isFinite && value.z.isFinite;
+
 /// Two-hand transform math ported from the hand-interaction research projects.
 /// Callers own landmark tracking and coordinate-space conversion.
 class TwoHandTransform {
@@ -156,64 +159,207 @@ class FrameRequestGate {
 }
 
 class Collider {
-  const Collider({required this.objectId, required this.halfExtents, this.mass = 1});
+  const Collider({
+    required this.objectId,
+    required this.halfExtents,
+    this.mass = 1,
+    this.isStatic = false,
+    this.restitution = .05,
+    this.friction = .5,
+  });
+
   final String objectId;
+  /// Axis-aligned half extents in world metres. Rotation is not represented.
   final Vec3 halfExtents;
   final double mass;
+  final bool isStatic;
+  final double restitution;
+  final double friction;
 }
 
-/// Deterministic fixed-step rigid-body starter for scene interactions. This is
-/// deliberately a lightweight domain simulation, not a replacement for a
-/// native collision solver; collision response is supplied by the host engine.
+/// Rigid body state in the shared scene coordinate system.
 class PhysicsBody {
-  PhysicsBody({required this.objectId, required this.position, this.velocity = const Vec3.zero(), this.mass = 1});
+  PhysicsBody({
+    required this.objectId,
+    required this.position,
+    this.velocity = const Vec3.zero(),
+    this.mass = 1,
+  });
+
   final String objectId;
   Vec3 position;
   Vec3 velocity;
   final double mass;
 }
 
+/// Fixed-step AABB collision world. This is a deterministic lightweight solver
+/// for simple digital props; it is not a substitute for a full 3D engine.
 class FixedStepPhysics {
-  FixedStepPhysics({this.stepSeconds = 1 / 60, this.gravity = const Vec3(0, -9.81, 0), this.maxSubSteps = 5});
+  FixedStepPhysics({
+    this.stepSeconds = 1 / 60,
+    this.gravity = const Vec3(0, -9.81, 0),
+    this.maxSubSteps = 5,
+    this.solverIterations = 4,
+  });
+
   final double stepSeconds;
   final Vec3 gravity;
   final int maxSubSteps;
+  final int solverIterations;
   final Map<String, PhysicsBody> _bodies = {};
+  final Map<String, Collider> _colliders = {};
   double _accumulator = 0;
-  Iterable<PhysicsBody> get bodies => _bodies.values;
+
+  Iterable<PhysicsBody> get bodies => List.unmodifiable(_bodies.values);
+  Iterable<Collider> get colliders => List.unmodifiable(_colliders.values);
 
   void addBody(PhysicsBody body) {
-    if (body.objectId.isEmpty || !body.mass.isFinite || body.mass <= 0) {
-      throw ArgumentError('A physics body needs a stable id and positive finite mass.');
+    if (body.objectId.trim().isEmpty ||
+        !_isFiniteVec3(body.position) ||
+        !_isFiniteVec3(body.velocity) ||
+        !body.mass.isFinite || body.mass <= 0) {
+      throw ArgumentError('A physics body needs a stable id, finite transforms and positive finite mass.');
     }
     _bodies[body.objectId] = body;
   }
 
-  void removeBody(String objectId) => _bodies.remove(objectId);
+  void addCollider(Collider collider) {
+    final extents = collider.halfExtents;
+    if (!_bodies.containsKey(collider.objectId)) {
+      throw StateError('A collider must reference an existing physics body.');
+    }
+    if (collider.objectId.isEmpty ||
+        !extents.x.isFinite || !extents.y.isFinite || !extents.z.isFinite ||
+        extents.x <= 0 || extents.y <= 0 || extents.z <= 0 ||
+        !collider.restitution.isFinite || collider.restitution < 0 || collider.restitution > 1 ||
+        !collider.friction.isFinite || collider.friction < 0 || collider.friction > 1) {
+      throw ArgumentError('Collider dimensions and material coefficients must be finite and within their physical ranges.');
+    }
+    _colliders[collider.objectId] = collider;
+  }
+
+  void removeCollider(String objectId) => _colliders.remove(objectId);
+
+  void removeBody(String objectId) {
+    _bodies.remove(objectId);
+    _colliders.remove(objectId);
+  }
 
   int advance(double deltaSeconds) {
-    if (!deltaSeconds.isFinite || deltaSeconds < 0) throw ArgumentError.value(deltaSeconds, 'deltaSeconds');
+    if (!deltaSeconds.isFinite || deltaSeconds < 0) {
+      throw ArgumentError.value(deltaSeconds, 'deltaSeconds');
+    }
+    if (!stepSeconds.isFinite || stepSeconds <= 0 || maxSubSteps < 1 || solverIterations < 1) {
+      throw StateError('Physics step and iteration limits must be positive.');
+    }
     _accumulator += math.min(deltaSeconds, stepSeconds * maxSubSteps).toDouble();
     var steps = 0;
     while (_accumulator >= stepSeconds && steps < maxSubSteps) {
-      for (final body in _bodies.values) {
-        body.velocity = body.velocity + gravity * stepSeconds;
-        body.position = body.position + body.velocity * stepSeconds;
-      }
+      _simulateStep();
       _accumulator -= stepSeconds;
       steps++;
     }
     return steps;
   }
 
+  void _simulateStep() {
+    for (final body in _bodies.values) {
+      if (_colliders[body.objectId]?.isStatic ?? false) continue;
+      body.velocity = body.velocity + gravity * stepSeconds;
+      body.position = body.position + body.velocity * stepSeconds;
+    }
+    for (var iteration = 0; iteration < solverIterations; iteration++) {
+      _resolveAabbContacts();
+    }
+  }
+
+  void _resolveAabbContacts() {
+    final active = _colliders.values
+        .where((collider) => _bodies.containsKey(collider.objectId))
+        .toList(growable: false);
+    for (var i = 0; i < active.length; i++) {
+      for (var j = i + 1; j < active.length; j++) {
+        final a = active[i];
+        final b = active[j];
+        if (a.isStatic && b.isStatic) continue;
+        final bodyA = _bodies[a.objectId]!;
+        final bodyB = _bodies[b.objectId]!;
+        final delta = bodyB.position - bodyA.position;
+        final overlapX = a.halfExtents.x + b.halfExtents.x - delta.x.abs();
+        final overlapY = a.halfExtents.y + b.halfExtents.y - delta.y.abs();
+        final overlapZ = a.halfExtents.z + b.halfExtents.z - delta.z.abs();
+        if (overlapX <= 0 || overlapY <= 0 || overlapZ <= 0) continue;
+
+        final penetration = math.min(overlapX, math.min(overlapY, overlapZ)).toDouble();
+        final normal = overlapX <= overlapY && overlapX <= overlapZ
+            ? Vec3(delta.x >= 0 ? 1 : -1, 0, 0)
+            : overlapY <= overlapZ
+                ? Vec3(0, delta.y >= 0 ? 1 : -1, 0)
+                : Vec3(0, 0, delta.z >= 0 ? 1 : -1);
+        final inverseMassA = a.isStatic ? 0.0 : 1 / bodyA.mass;
+        final inverseMassB = b.isStatic ? 0.0 : 1 / bodyB.mass;
+        final inverseMassSum = inverseMassA + inverseMassB;
+        if (inverseMassSum <= 0) continue;
+
+        // Positional correction prevents persistent interpenetration without
+        // injecting a large velocity into resting objects.
+        final correctionMagnitude = math.max(0.0, penetration - .0005) * .8 / inverseMassSum;
+        if (!a.isStatic) {
+          bodyA.position = bodyA.position - normal * (correctionMagnitude * inverseMassA);
+        }
+        if (!b.isStatic) {
+          bodyB.position = bodyB.position + normal * (correctionMagnitude * inverseMassB);
+        }
+
+        final relativeVelocity = bodyB.velocity - bodyA.velocity;
+        final velocityAlongNormal = _dot(relativeVelocity, normal);
+        if (velocityAlongNormal > 0) continue;
+        final restitution = math.min(a.restitution, b.restitution).toDouble();
+        final impulseMagnitude = -(1 + restitution) * velocityAlongNormal / inverseMassSum;
+        final impulse = normal * impulseMagnitude;
+        if (!a.isStatic) {
+          bodyA.velocity = bodyA.velocity - impulse * inverseMassA;
+        }
+        if (!b.isStatic) {
+          bodyB.velocity = bodyB.velocity + impulse * inverseMassB;
+        }
+
+        // Coulomb-style friction impulse, bounded by the normal impulse.
+        final postImpulseRelative = bodyB.velocity - bodyA.velocity;
+        final tangentVelocity = postImpulseRelative - normal * _dot(postImpulseRelative, normal);
+        final tangentLength = tangentVelocity.length;
+        if (tangentLength <= 1e-8 || impulseMagnitude <= 0) continue;
+        final tangent = tangentVelocity * (1 / tangentLength);
+        var frictionImpulseMagnitude = -_dot(postImpulseRelative, tangent) / inverseMassSum;
+        final frictionLimit = impulseMagnitude * math.sqrt(a.friction * b.friction);
+        frictionImpulseMagnitude = frictionImpulseMagnitude
+            .clamp(-frictionLimit, frictionLimit)
+            .toDouble();
+        final frictionImpulse = tangent * frictionImpulseMagnitude;
+        if (!a.isStatic) {
+          bodyA.velocity = bodyA.velocity - frictionImpulse * inverseMassA;
+        }
+        if (!b.isStatic) {
+          bodyB.velocity = bodyB.velocity + frictionImpulse * inverseMassB;
+        }
+      }
+    }
+  }
+
+  double _dot(Vec3 a, Vec3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
+
   void applyImpulse(String objectId, Vec3 impulse) {
+    if (!_isFiniteVec3(impulse)) {
+      throw ArgumentError.value(impulse, 'impulse', 'Impulse components must be finite.');
+    }
     final body = _bodies[objectId];
-    if (body == null) return;
+    if (body == null || (_colliders[objectId]?.isStatic ?? false)) return;
     body.velocity = body.velocity + impulse * (1 / body.mass);
   }
 
   void reset() {
     _bodies.clear();
+    _colliders.clear();
     _accumulator = 0;
   }
 }
