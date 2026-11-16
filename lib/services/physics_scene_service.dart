@@ -1269,7 +1269,7 @@ class PhysicsSceneService {
     _bodyIdsByHandle.clear();
     _joints.clear();
     _accumulator = 0;
-    _eventController.close();
+    unawaited(_eventController.close());
   }
 
   Matrix4 _matrixFromPose(Pointer<Float> values, int offset) {
