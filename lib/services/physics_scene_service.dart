@@ -49,13 +49,20 @@ class PhysicsRaycastHit {
   final double depth;
 }
 
-enum _ShapeKind { box, sphere, capsule }
+enum _ShapeKind { box, sphere, capsule, convexHull, triangleMesh }
 
 class _ShapeSpec {
-  const _ShapeSpec(this.kind, this.values);
+  const _ShapeSpec(
+    this.kind,
+    this.values, {
+    this.indices,
+    this.convexRadius,
+  });
 
   final _ShapeKind kind;
   final List<double> values;
+  final List<int>? indices;
+  final double? convexRadius;
 }
 
 class _BodyRecord {
@@ -280,6 +287,87 @@ class PhysicsSceneService {
     );
   }
 
+  void addDynamicConvexHull({
+    required String id,
+    required Matrix4 worldTransform,
+    required List<Vector3> vertices,
+    double maxConvexRadius = 0.02,
+    double friction = 0.55,
+    double restitution = 0.05,
+    double mass = 0,
+    bool continuous = true,
+  }) {
+    if (vertices.length < 4 || vertices.length > 4096) {
+      throw ArgumentError.value(vertices.length, 'vertices.length');
+    }
+    _validatePositive(maxConvexRadius, 'maxConvexRadius');
+    if (vertices.any((vertex) => !_isFiniteVector(vertex))) {
+      throw ArgumentError('Convex hull vertices must be finite.');
+    }
+    final flattened = <double>[
+      for (final vertex in vertices) ...<double>[vertex.x, vertex.y, vertex.z],
+    ];
+    _addBody(
+      id: id,
+      shape: _ShapeSpec(
+        _ShapeKind.convexHull,
+        flattened,
+        convexRadius: maxConvexRadius,
+      ),
+      motionType: jolt.JJ_MOTION_DYNAMIC,
+      worldTransform: worldTransform,
+      friction: friction,
+      restitution: restitution,
+      gravityFactor: 1,
+      mass: mass,
+      layer: 1,
+      sensor: false,
+      continuous: continuous,
+    );
+  }
+
+  void addStaticMesh({
+    required String id,
+    required Matrix4 worldTransform,
+    required List<Vector3> vertices,
+    required List<int> triangleIndices,
+    double friction = 0.85,
+    double restitution = 0,
+  }) {
+    if (vertices.length < 3 || vertices.length > 100000) {
+      throw ArgumentError.value(vertices.length, 'vertices.length');
+    }
+    if (triangleIndices.isEmpty ||
+        triangleIndices.length % 3 != 0 ||
+        triangleIndices.length > 600000) {
+      throw ArgumentError.value(triangleIndices.length, 'triangleIndices');
+    }
+    if (vertices.any((vertex) => !_isFiniteVector(vertex)) ||
+        triangleIndices.any((index) => index < 0 || index >= vertices.length)) {
+      throw ArgumentError('Static mesh contains invalid vertices or indices.');
+    }
+    final flattened = <double>[
+      for (final vertex in vertices) ...<double>[vertex.x, vertex.y, vertex.z],
+    ];
+    _addBody(
+      id: id,
+      shape: _ShapeSpec(
+        _ShapeKind.triangleMesh,
+        flattened,
+        indices: List<int>.unmodifiable(triangleIndices),
+      ),
+      motionType: jolt.JJ_MOTION_STATIC,
+      worldTransform: worldTransform,
+      friction: friction,
+      restitution: restitution,
+      gravityFactor: 0,
+      mass: 0,
+      layer: 0,
+      sensor: false,
+      continuous: false,
+    );
+  }
+
   void addSensorBox({
     required String id,
     required Matrix4 worldTransform,
@@ -437,6 +525,70 @@ class PhysicsSceneService {
           spec.values[0],
           spec.values[1],
         ).cast();
+      case _ShapeKind.convexHull:
+        final count = spec.values.length ~/ 3;
+        final points = arena<jolt.JPH_Vec3>(count);
+        for (var i = 0; i < count; i++) {
+          points[i]
+            ..x = spec.values[i * 3]
+            ..y = spec.values[i * 3 + 1]
+            ..z = spec.values[i * 3 + 2];
+        }
+        final settings = jolt.JPH_ConvexHullShapeSettings_Create(
+          points,
+          count,
+          spec.convexRadius ?? 0.02,
+        );
+        if (settings.address == 0) {
+          throw StateError('Jolt could not create convex hull settings.');
+        }
+        try {
+          final shape = jolt.JPH_ConvexHullShapeSettings_CreateShape(settings);
+          if (shape.address == 0) {
+            throw StateError('Jolt could not cook convex hull shape.');
+          }
+          return shape.cast();
+        } finally {
+          jolt.JPH_ShapeSettings_Destroy(settings.cast());
+        }
+      case _ShapeKind.triangleMesh:
+        final count = spec.values.length ~/ 3;
+        final points = arena<jolt.JPH_Vec3>(count);
+        for (var i = 0; i < count; i++) {
+          points[i]
+            ..x = spec.values[i * 3]
+            ..y = spec.values[i * 3 + 1]
+            ..z = spec.values[i * 3 + 2];
+        }
+        final indices = spec.indices!;
+        final triangleCount = indices.length ~/ 3;
+        final triangles = arena<jolt.JPH_IndexedTriangle>(triangleCount);
+        for (var i = 0; i < triangleCount; i++) {
+          triangles[i]
+            ..i1 = indices[i * 3]
+            ..i2 = indices[i * 3 + 1]
+            ..i3 = indices[i * 3 + 2]
+            ..materialIndex = 0
+            ..userData = 0;
+        }
+        final settings = jolt.JPH_MeshShapeSettings_Create2(
+          points,
+          count,
+          triangles,
+          triangleCount,
+        );
+        if (settings.address == 0) {
+          throw StateError('Jolt could not create triangle mesh settings.');
+        }
+        try {
+          final shape = jolt.JPH_MeshShapeSettings_CreateShape(settings);
+          if (shape.address == 0) {
+            throw StateError('Jolt could not cook static triangle mesh.');
+          }
+          return shape.cast();
+        } finally {
+          jolt.JPH_ShapeSettings_Destroy(settings.cast());
+        }
     }
   }
 
