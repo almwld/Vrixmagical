@@ -150,6 +150,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       physics.advance(
         now.difference(previous).inMicroseconds / Duration.microsecondsPerSecond,
       );
+      // Drain native events every frame so contact buffers cannot accumulate.
+      physics.drainEvents();
       final activeTransforms = physics.activeBodyTransforms();
       for (final asset in _placed) {
         if (_manuallyControlledNodes.contains(asset.node.name)) continue;
