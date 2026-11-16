@@ -7,7 +7,7 @@ Updated for `feature/production-jolt-physics`.
 | Layer | Implemented | Verification boundary |
 |---|---|---|
 | Native 3D engine | Jolt Physics 5.6 via standalone `just_jolt` FFI build hook | Native Android packaging and physical-device startup still required |
-| Rigid bodies | Static/dynamic bodies, mass, damping, gravity factor, sleeping | Kinematic body control is not exposed in the app adapter |
+| Rigid bodies | Static/dynamic/kinematic bodies, mass, damping, gravity factor, sleeping and continuous-collision mode | Device-level motion/CCD regression matrix pending |
 | Collider shapes | Box, sphere, capsule, dynamic convex hull and static triangle mesh | Automatic GLB mesh extraction, compound collider authoring and per-asset collider import not yet wired |
 | Contact response | Jolt broadphase/narrowphase, friction, restitution and sleeping | Scene-specific material tuning and contact regression tests pending |
 | Continuous collision | Jolt linear-cast motion quality for fast dynamic bodies | High-speed tunneling test matrix pending |
@@ -15,7 +15,7 @@ Updated for `feature/production-jolt-physics`.
 | Spatial queries | Batched Jolt raycast, overlap and box shape-cast hits with layer masks and ignore-body support | GLB mesh query authoring and query performance profiling pending |
 | Constraints | Fixed, point, hinge, slider, distance and six-DOF joints; hinge/slider motors and limits | Constraint stress/limit regression tests pending |
 | Fixed stepping | Bounded 60 Hz accumulator, capped substeps, native collision substeps | Frame-time profiling on target hardware pending |
-| AR synchronization | Batch active-body pose reads -> anchor-local ARNode transforms; drag/rotate hand-off | Physical coordinate/scale calibration pending |
+| AR synchronization | Batch active-body pose reads -> anchor-local ARNode transforms; 30 Hz thresholded platform writes; drag/rotate hand-off | Physical coordinate/scale calibration and frame-time profiling pending |
 | Resource lifecycle | Body/joint/world destruction, timer cancellation, app background/foreground pause | Repeated open/close soak test pending |
 
 The runtime uses the standalone Jolt FFI package rather than a renderer-coupled 3D framework. Jolt is built from source with the package's native build hook, explicitly enabled in the consuming app. This avoids bundling an unrelated Filament renderer into the AR application.
