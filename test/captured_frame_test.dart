@@ -82,7 +82,7 @@ void main() {
       );
     });
 
-    test('rejects paused tracking frames', () {
+    test('rejects rotated RGB until an explicit registration transform exists', () {\n      final captured = makeFrame();\n      final rotated = CapturedFrame(\n        rgbBytes: captured.rgbBytes,\n        rgbTimestampNs: captured.rgbTimestampNs,\n        rgbIntrinsics: captured.rgbIntrinsics,\n        cameraPose: captured.cameraPose,\n        trackingState: captured.trackingState,\n        depthSupport: captured.depthSupport,\n        depth: captured.depth,\n        imageRotationDegrees: 90,\n      );\n      expect(() => rotated.validate(requireDepth: true), throwsFormatException);\n    });\n\n    test('rejects paused tracking frames', () {
       final captured = makeFrame();
       final paused = CapturedFrame(
         rgbBytes: captured.rgbBytes,
@@ -141,7 +141,7 @@ void main() {
       expect(points.length, 3);
     });
 
-    test('rejects masks that do not match RGB dimensions', () {
+    test('aligns a lower-resolution segmentation mask to the RGB grid', () {\n      final aligned = const SegmentationMaskAligner().alignNearestNeighbor(\n        mask: Uint8List.fromList([255, 0, 0, 255]),\n        maskWidth: 2,\n        maskHeight: 2,\n        rgbWidth: 4,\n        rgbHeight: 4,\n      );\n      expect(aligned.length, 16);\n      expect(aligned[0], 255);\n      expect(aligned[3], 0);\n      expect(aligned[12], 0);\n      expect(aligned[15], 255);\n    });\n\n    test('voxel fusion averages points in the same spatial cell', () {\n      final fused = const PointCloudVoxelFusion().downsample(\n        [Vector3(0.001, 0, 0), Vector3(0.004, 0, 0), Vector3(0.02, 0, 0)],\n        voxelSizeMeters: .01,\n      );\n      expect(fused.length, 2);\n      expect(fused.first.x, closeTo(.0025, 1e-6));\n    });\n\n    test('rejects masks that do not match RGB dimensions', () {
       expect(
         () => const MaskedPointCloudBuilder().build(
           frame: makeFrame(),
