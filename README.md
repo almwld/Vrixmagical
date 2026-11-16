@@ -6,6 +6,8 @@ VirxMagical is an Android-first Flutter application for interactive digital repr
 
 - Arabic-first Flutter app shell and navigation.
 - **AR scene:** native ARCore/ARKit session through `flutter_reality`, horizontal/vertical plane detection, tap hit-testing, anchors, GLB placement, drag/rotate and removal.
+- **Unified object identity:** `VrixObject` represents captured, library, generated and imported objects with shared transforms, semantic tags, metadata and physics profiles.
+- **Local object library:** persistent GLB/GLTF import, license/source metadata, path validation and semantic search. Arbitrary imported-model placement into the AR renderer remains pending.
 - **3D physics:** standalone Jolt Physics 5.6 native runtime through `just_jolt`; static/dynamic rigid bodies, box/sphere/capsule/convex-hull/static-triangle-mesh colliders, continuous collision mode, collision layers, sensors, buffered contact events, ray queries and six joint families.
 - **Physics-to-AR bridge:** fixed-step Jolt simulation, batch active-body transform reads, world-to-anchor-local pose conversion, 30 Hz thresholded AR transform writes, manual interaction hand-off and explicit native teardown.
 - **Hand mirror:** camera preview plus Google's MediaPipe Hand Landmarker in live-stream mode. A pinch grabs and moves a digital overlay; the physical source object is never modified.
