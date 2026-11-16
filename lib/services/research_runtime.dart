@@ -259,7 +259,7 @@ class SceneCommand {
 class SceneCommandParser {
   static SceneCommand? parse(String input, Set<String> knownObjectIds) {
     final text = input.trim().toLowerCase();
-    final match = RegExp(r'^(hide|show|delete|duplicate|select)\\s+([a-z0-9_-]+)$').firstMatch(text);
+    final match = RegExp(r'^(hide|show|delete|duplicate|select)\s+([a-z0-9_-]+)$').firstMatch(text);
     if (match == null) return null;
     final id = match.group(2)!;
     if (!knownObjectIds.contains(id)) return null;
