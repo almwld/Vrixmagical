@@ -22,7 +22,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/
+    - assets/mediapipe/
 hooks:
   user_defines:
     mediapipe_vision:
