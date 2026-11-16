@@ -18,6 +18,13 @@ abstract final class AppTheme {
       seedColor: AppColors.primary,
       brightness: Brightness.dark,
       surface: AppColors.surface,
+    ).copyWith(
+      primary: AppColors.primary,
+      secondary: AppColors.secondary,
+      surface: AppColors.surface,
+      onSurface: AppColors.text,
+      onPrimary: const Color(0xFF07151D),
+      outline: AppColors.border,
     );
 
     return ThemeData(
@@ -28,6 +35,37 @@ abstract final class AppTheme {
       canvasColor: AppColors.background,
       dividerColor: AppColors.border,
       splashFactory: InkSparkle.splashFactory,
+      textTheme: const TextTheme(
+        bodyLarge: TextStyle(
+          color: AppColors.text,
+          fontSize: 14,
+          height: 1.5,
+        ),
+        bodyMedium: TextStyle(
+          color: AppColors.text,
+          fontSize: 13,
+          height: 1.5,
+        ),
+        bodySmall: TextStyle(
+          color: AppColors.muted,
+          fontSize: 11,
+          height: 1.5,
+        ),
+        titleLarge: TextStyle(
+          color: AppColors.text,
+          fontSize: 20,
+          fontWeight: FontWeight.w900,
+        ),
+        titleMedium: TextStyle(
+          color: AppColors.text,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+        labelLarge: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.text,
@@ -63,6 +101,61 @@ abstract final class AppTheme {
           ),
         ),
       ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: const Color(0xFF07151D),
+          disabledBackgroundColor: AppColors.surfaceElevated,
+          disabledForegroundColor: AppColors.muted,
+          elevation: 0,
+          minimumSize: const Size(0, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.primary,
+          side: const BorderSide(color: AppColors.border),
+          minimumSize: const Size(0, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(13),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: AppColors.muted,
+          backgroundColor: AppColors.surfaceElevated,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(13),
+          ),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: AppColors.surfaceElevated,
+        selectedColor: AppColors.primary.withValues(alpha: .14),
+        side: const BorderSide(color: AppColors.border),
+        labelStyle: const TextStyle(
+          color: AppColors.text,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(11),
+        ),
+      ),
       cardTheme: CardThemeData(
         color: AppColors.surface,
         elevation: 0,
@@ -75,6 +168,18 @@ abstract final class AppTheme {
       listTileTheme: const ListTileThemeData(
         iconColor: AppColors.primary,
         textColor: AppColors.text,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: AppColors.surfaceElevated,
+        contentTextStyle: const TextStyle(
+          color: AppColors.text,
+          fontSize: 12,
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: AppColors.border),
+        ),
       ),
     );
   }
