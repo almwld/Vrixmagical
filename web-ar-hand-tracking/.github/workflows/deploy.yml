@@ -1,0 +1,45 @@
+name: Deploy
+
+# El deploy NO se dispara solo en push: espera a que el workflow de CI termine en
+# verde para el mismo commit (workflow_run con conclusion == 'success'). Así no se
+# puede publicar a producción con format/lint/typecheck/test/build en rojo —el
+# gate de calidad de CI también protege el paso a usuarios.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # En workflow_run sólo publicamos si CI concluyó en éxito; en workflow_dispatch
+    # (disparo manual) no hay event.workflow_run, así que dejamos pasar.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v5

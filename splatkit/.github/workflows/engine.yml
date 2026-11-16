@@ -1,0 +1,41 @@
+name: splatkit-engine
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded PR checks; preserve each main commit for the release and mirror gates.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Pull requests run only the jobs their files reach (.github/ci-filters.yml); main runs all.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      engine: ${{ steps.changes.outputs.engine }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - id: changes
+        uses: ./.github/actions/changes
+
+  test:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.engine == 'true') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: cmake -S packages/splatkit-engine -B build/splatkit-engine -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/splatkit-engine --parallel
+      - name: Test
+        run: ctest --test-dir build/splatkit-engine --output-on-failure

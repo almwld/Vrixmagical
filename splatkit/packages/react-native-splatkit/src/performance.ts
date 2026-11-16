@@ -1,0 +1,697 @@
+import type {
+  RenderOptions,
+  SHDegree,
+  SplatLimits,
+  WorldRequest,
+} from './contracts';
+import {
+  WorldKind,
+  validateRenderOptions,
+  validateWorldRequest,
+} from './contracts';
+import type {NativeProps} from './specs/SplatViewNativeComponent';
+import {
+  MAX_INT32,
+  MAX_RENDER_SCALE,
+  MAX_SH_DEGREE,
+  MIN_RENDER_SCALE,
+  integer,
+  range,
+} from './validation';
+
+const SORT_DEPTHS = [16, 32] as const;
+export type SortDepth = (typeof SORT_DEPTHS)[number];
+
+export const PerformanceMode = {auto: 'auto', manual: 'manual'} as const;
+export type PerformanceMode =
+  (typeof PerformanceMode)[keyof typeof PerformanceMode];
+
+/** Ordered by decreasing detail; `build` resolves each against the device's own limits. */
+export const QualityPreset = {
+  highEnd: 'highEnd',
+  high: 'high',
+  balanced: 'balanced',
+  performance: 'performance',
+} as const;
+export type QualityPreset = (typeof QualityPreset)[keyof typeof QualityPreset];
+export const qualityPresets: readonly QualityPreset[] = Object.freeze([
+  QualityPreset.highEnd,
+  QualityPreset.high,
+  QualityPreset.balanced,
+  QualityPreset.performance,
+]);
+
+/** Which policy fields one native adapter applies; the rest fall back natively. */
+export type NativePolicySupport = Readonly<{
+  lodErrorPixels: boolean;
+  alphaThreshold: boolean;
+  subpixelThreshold: boolean;
+  enableFrustumCulling: boolean;
+  enableHiZOcclusion: boolean;
+  enableEarlyTermination: boolean;
+  sortDepth: boolean;
+}>;
+
+/** Host-supplied constraints. Use nativeCapabilitiesFromEvent for the native report. */
+export type DeviceCapabilities = Readonly<{
+  limits: SplatLimits;
+  supportsHiZOcclusion: boolean;
+  supportsSubgroups: boolean;
+  maxTextureDimension: number;
+  /** The native adapter's policy acceptance. Absent means it is unknown yet. */
+  policy?: NativePolicySupport;
+}>;
+
+/**
+ * What to build the first world request against, before an engine has reported its own.
+ *
+ * Capabilities arrive with the engine a world load creates, so the first request has to be
+ * built against a guess, and a guess above what the adapter accepts is rejected outright:
+ * no engine, no capabilities, and a host with no way to learn what it got wrong. These are
+ * the narrowest limits any shipped backend reports, so every adapter accepts a request
+ * built against them. Rebuild on `onCapabilities` to reach the limits the device really has.
+ */
+export const conservativeCapabilities: DeviceCapabilities = Object.freeze({
+  limits: Object.freeze({
+    maxLodCapacitySplats: 4_000_000,
+    minResidencyCapacitySplats: 100_000,
+    maxResidencyCapacitySplats: 8_000_000,
+  }),
+  supportsHiZOcclusion: false,
+  supportsSubgroups: false,
+  maxTextureDimension: 4096,
+});
+
+/** The policy as it crosses the Fabric boundary; enum values are the numbers native uses. */
+export type NativeRenderPolicy = Readonly<{
+  revision: number;
+  lodErrorPixels: number;
+  alphaThreshold: number;
+  subpixelThreshold: number;
+  enableFrustumCulling: boolean;
+  enableHiZOcclusion: boolean;
+  enableEarlyTermination: boolean;
+  sortDepth: number;
+}>;
+
+/** The flat onCapabilities event payload, as declared in the spec. */
+export type NativeCapabilitiesEvent = Readonly<{
+  maxLodCapacitySplats: number;
+  minResidencyCapacitySplats: number;
+  maxResidencyCapacitySplats: number;
+  supportsHiZOcclusion: boolean;
+  supportsSubgroups: boolean;
+  maxTextureDimension: number;
+  policyLodErrorPixels: boolean;
+  policyAlphaThreshold: boolean;
+  policySubpixelThreshold: boolean;
+  policyEnableFrustumCulling: boolean;
+  policyEnableHiZOcclusion: boolean;
+  policyEnableEarlyTermination: boolean;
+  policySortDepth: boolean;
+}>;
+
+/** Capacities are configured by the performance policy, not duplicated here. */
+export type SplatKitWorldRequest = Readonly<
+  Omit<WorldRequest, 'lodCapacitySplats' | 'residencyCapacitySplats'>
+>;
+
+export type PerformancePolicy = Readonly<{
+  mode: PerformanceMode;
+  preset: QualityPreset;
+  lodErrorPixels: number;
+  lodBudgetSplats: number;
+  alphaThreshold: number;
+  subpixelThreshold: number;
+  enableFrustumCulling: boolean;
+  enableHiZOcclusion: boolean;
+  enableEarlyTermination: boolean;
+  sortDepth: SortDepth;
+  renderScale: number;
+  shDegree: SHDegree;
+  residencyCapacitySplats: number;
+  /** A request only. It never implicitly enables dynamic quality. */
+  targetFps: number | null;
+}>;
+
+export type PerformanceOptions = Partial<
+  Omit<PerformancePolicy, 'mode' | 'preset'>
+>;
+
+/** null means native support is unknown: build with capabilities from onCapabilities. */
+export type EffectivePerformancePolicy = Readonly<{
+  lodErrorPixels: number | null;
+  lodBudgetSplats: number;
+  alphaThreshold: number | null;
+  subpixelThreshold: number | null;
+  enableFrustumCulling: boolean | null;
+  enableHiZOcclusion: boolean | null;
+  enableEarlyTermination: boolean | null;
+  sortDepth: SortDepth | null;
+  renderScale: number;
+  shDegree: SHDegree;
+  residencyCapacitySplats: number;
+  targetFps: null;
+}>;
+
+const DiagnosticCode = {
+  fabricOptionUnavailable: 'fabric-option-unavailable',
+  nativeSupportUnknown: 'native-support-unknown',
+  limitClamped: 'limit-clamped',
+  nativeOptionFallback: 'native-option-fallback',
+} as const;
+type DiagnosticCode = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
+
+export type PerformanceDiagnostic = Readonly<{
+  severity: 'warning';
+  code: DiagnosticCode;
+  option: keyof PerformancePolicy;
+  requested: PerformancePolicy[keyof PerformancePolicy];
+  /** A candidate fallback, not a claim about applied native state. */
+  fallback: PerformancePolicy[keyof PerformancePolicy] | null;
+  message: string;
+}>;
+
+export type PerformanceResolution = Readonly<{
+  requested: PerformancePolicy;
+  effective: EffectivePerformancePolicy;
+  diagnostics: readonly PerformanceDiagnostic[];
+}>;
+
+export type SplatKitConfiguration = Readonly<{
+  world: WorldRequest;
+  render: RenderOptions;
+  performance: PerformanceResolution;
+}>;
+
+/** What applying a changed policy costs. Compare against these, not the strings. */
+export const PolicyChangeKind = {
+  none: 'none',
+  /** New Fabric props reach the live engine; nothing reloads. */
+  nativePropUpdate: 'nativePropUpdate',
+  /** A load-time budget moved: only a fresh world request picks it up. */
+  worldReload: 'worldReload',
+  unavailable: 'unavailable',
+} as const;
+export type PolicyChangeKind =
+  (typeof PolicyChangeKind)[keyof typeof PolicyChangeKind];
+
+/** What one policy application reported. */
+export const PolicyPhase = {
+  applied: 'applied',
+  /** A field fell back; the message joins the reasons. */
+  warning: 'warning',
+  rejected: 'rejected',
+} as const;
+export type PolicyPhase = (typeof PolicyPhase)[keyof typeof PolicyPhase];
+
+const loadKeys = new Set<keyof PerformancePolicy>([
+  'lodBudgetSplats',
+  'residencyCapacitySplats',
+]);
+// renderScale and shDegree are their own props; the rest travel in the `policy` prop.
+const propKeys = new Set<keyof PerformancePolicy>([
+  'renderScale',
+  'shDegree',
+  'lodErrorPixels',
+  'alphaThreshold',
+  'subpixelThreshold',
+  'enableFrustumCulling',
+  'enableHiZOcclusion',
+  'enableEarlyTermination',
+  'sortDepth',
+]);
+
+/** Describes Fabric work only; it does not guarantee runtime safety or no stalls. */
+export function classifyPolicyChange(
+  previous: PerformancePolicy,
+  next: PerformancePolicy,
+): PolicyChangeKind {
+  let unavailable = false;
+  let propUpdate = false;
+  for (const key of Object.keys(previous) as (keyof PerformancePolicy)[]) {
+    if (previous[key] === next[key] || key === 'mode' || key === 'preset')
+      continue;
+    if (loadKeys.has(key)) return PolicyChangeKind.worldReload;
+    if (propKeys.has(key)) propUpdate = true;
+    else unavailable = true;
+  }
+  if (propUpdate) return PolicyChangeKind.nativePropUpdate;
+  return unavailable ? PolicyChangeKind.unavailable : PolicyChangeKind.none;
+}
+
+/** Converts resolved values to the complete current Fabric prop surface. */
+export function toNativeViewProps(
+  configuration: SplatKitConfiguration,
+): Pick<NativeProps, 'world' | 'paused' | 'renderScale' | 'shDegree'> {
+  return {
+    world: configuration.world,
+    paused: configuration.render.paused,
+    renderScale: configuration.performance.effective.renderScale,
+    shDegree: configuration.performance.effective.shDegree,
+  };
+}
+
+/**
+ * The complete requested policy as the Fabric `policy` prop expects it. Pass a new positive
+ * revision for each change; native reports `onPolicyEvent` under it and treats 0 or less as
+ * no policy, so those are rejected here.
+ */
+export function toNativePolicyProp(
+  configuration: SplatKitConfiguration,
+  revision: number,
+): NativeRenderPolicy {
+  integer('revision', revision, 1, MAX_INT32);
+  const policy = configuration.performance.requested;
+  return {
+    revision,
+    lodErrorPixels: policy.lodErrorPixels,
+    alphaThreshold: policy.alphaThreshold,
+    subpixelThreshold: policy.subpixelThreshold,
+    enableFrustumCulling: policy.enableFrustumCulling,
+    enableHiZOcclusion: policy.enableHiZOcclusion,
+    enableEarlyTermination: policy.enableEarlyTermination,
+    sortDepth: policy.sortDepth,
+  };
+}
+
+/** Builds the capabilities `build` takes from the native adapter's onCapabilities event. */
+export function nativeCapabilitiesFromEvent(
+  event: NativeCapabilitiesEvent,
+): DeviceCapabilities {
+  return Object.freeze({
+    limits: Object.freeze({
+      maxLodCapacitySplats: event.maxLodCapacitySplats,
+      minResidencyCapacitySplats: event.minResidencyCapacitySplats,
+      maxResidencyCapacitySplats: event.maxResidencyCapacitySplats,
+    }),
+    supportsHiZOcclusion: event.supportsHiZOcclusion,
+    supportsSubgroups: event.supportsSubgroups,
+    maxTextureDimension: event.maxTextureDimension,
+    policy: Object.freeze({
+      lodErrorPixels: event.policyLodErrorPixels,
+      alphaThreshold: event.policyAlphaThreshold,
+      subpixelThreshold: event.policySubpixelThreshold,
+      enableFrustumCulling: event.policyEnableFrustumCulling,
+      enableHiZOcclusion: event.policyEnableHiZOcclusion,
+      enableEarlyTermination: event.policyEnableEarlyTermination,
+      sortDepth: event.policySortDepth,
+    }),
+  });
+}
+
+/** The shared native RenderPolicy defaults; a backend starts from its own fallback. */
+const nativeDefaults = {
+  lodErrorPixels: 1,
+  alphaThreshold: 1 / 255,
+  subpixelThreshold: 1,
+  enableFrustumCulling: true,
+  enableHiZOcclusion: false,
+  enableEarlyTermination: true,
+  sortDepth: 16,
+} as const;
+
+type PresetValues = Omit<PerformancePolicy, 'mode' | 'preset'>;
+const presets: Readonly<Record<QualityPreset, PresetValues>> = {
+  highEnd: {
+    lodErrorPixels: 0.75,
+    lodBudgetSplats: 4_000_000,
+    alphaThreshold: 1 / 255,
+    subpixelThreshold: nativeDefaults.subpixelThreshold,
+    enableFrustumCulling: true,
+    enableHiZOcclusion: true,
+    enableEarlyTermination: true,
+    sortDepth: 32,
+    renderScale: 1.25,
+    shDegree: 3,
+    residencyCapacitySplats: 4_000_000,
+    targetFps: null,
+  },
+  high: {
+    lodErrorPixels: 1,
+    lodBudgetSplats: 3_000_000,
+    alphaThreshold: 1 / 255,
+    subpixelThreshold: nativeDefaults.subpixelThreshold,
+    enableFrustumCulling: true,
+    enableHiZOcclusion: true,
+    enableEarlyTermination: true,
+    sortDepth: 32,
+    renderScale: 1,
+    shDegree: 3,
+    residencyCapacitySplats: 3_000_000,
+    targetFps: null,
+  },
+  balanced: {
+    lodErrorPixels: 1.25,
+    lodBudgetSplats: 2_000_000,
+    alphaThreshold: 1 / 255,
+    subpixelThreshold: nativeDefaults.subpixelThreshold,
+    enableFrustumCulling: true,
+    enableHiZOcclusion: false,
+    enableEarlyTermination: true,
+    sortDepth: 16,
+    renderScale: 0.85,
+    shDegree: 2,
+    residencyCapacitySplats: 2_000_000,
+    targetFps: null,
+  },
+  performance: {
+    lodErrorPixels: 2,
+    lodBudgetSplats: 1_000_000,
+    alphaThreshold: 2 / 255,
+    subpixelThreshold: nativeDefaults.subpixelThreshold,
+    enableFrustumCulling: true,
+    enableHiZOcclusion: false,
+    enableEarlyTermination: true,
+    sortDepth: 16,
+    renderScale: 0.65,
+    shDegree: 1,
+    residencyCapacitySplats: 1_000_000,
+    targetFps: null,
+  },
+};
+
+const optionKeys = new Set<string>([...loadKeys, ...propKeys, 'targetFps']);
+// Keyed by the type, so a new world field fails to compile until withWorld accepts it.
+const worldFields: Readonly<Record<keyof SplatKitWorldRequest, true>> = {
+  requestId: true,
+  filePath: true,
+  kind: true,
+  maxShDegree: true,
+  sourceFrame: true,
+  fieldOfViewDegrees: true,
+  nearPlane: true,
+  farPlane: true,
+};
+const worldKeys = new Set<string>(Object.keys(worldFields));
+const policyPropKeys = [
+  'lodErrorPixels',
+  'alphaThreshold',
+  'subpixelThreshold',
+  'enableFrustumCulling',
+  'enableHiZOcclusion',
+  'enableEarlyTermination',
+  'sortDepth',
+] as const;
+
+function isPreset(value: unknown): value is QualityPreset {
+  return typeof value === 'string' && Object.hasOwn(presets, value);
+}
+
+function validatePolicy(policy: PerformancePolicy): void {
+  if (!Object.values(PerformanceMode).includes(policy.mode))
+    throw new TypeError('invalid mode');
+  if (!isPreset(policy.preset))
+    throw new TypeError('invalid performance preset');
+  if (!(SORT_DEPTHS as readonly number[]).includes(policy.sortDepth)) {
+    throw new RangeError('invalid sortDepth');
+  }
+  integer('lodBudgetSplats', policy.lodBudgetSplats, 0, MAX_INT32);
+  integer(
+    'residencyCapacitySplats',
+    policy.residencyCapacitySplats,
+    1,
+    MAX_INT32,
+  );
+  integer('shDegree', policy.shDegree, 0, MAX_SH_DEGREE);
+  range('renderScale', policy.renderScale, MIN_RENDER_SCALE, MAX_RENDER_SCALE);
+  range(
+    'lodErrorPixels',
+    policy.lodErrorPixels,
+    Number.MIN_VALUE,
+    Number.MAX_VALUE,
+  );
+  range('alphaThreshold', policy.alphaThreshold, 0, 1);
+  range('subpixelThreshold', policy.subpixelThreshold, 0, Number.MAX_VALUE);
+  for (const key of [
+    'enableFrustumCulling',
+    'enableHiZOcclusion',
+    'enableEarlyTermination',
+  ] as const) {
+    if (typeof policy[key] !== 'boolean')
+      throw new TypeError(`${key} must be boolean`);
+  }
+  if (policy.targetFps !== null) range('targetFps', policy.targetFps, 1, 240);
+}
+
+function validateCapabilities(capabilities: DeviceCapabilities): void {
+  for (const key of ['supportsHiZOcclusion', 'supportsSubgroups'] as const) {
+    if (typeof capabilities[key] !== 'boolean')
+      throw new TypeError(`${key} must be boolean`);
+  }
+  integer(
+    'maxTextureDimension',
+    capabilities.maxTextureDimension,
+    1,
+    MAX_INT32,
+  );
+}
+
+/** Keeps the first warning for each code and option. */
+class DiagnosticLog {
+  readonly diagnostics: PerformanceDiagnostic[] = [];
+  private readonly keys = new Set<string>();
+
+  warn(
+    code: DiagnosticCode,
+    option: keyof PerformancePolicy,
+    requested: PerformanceDiagnostic['requested'],
+    fallback: PerformanceDiagnostic['fallback'],
+    message: string,
+  ): void {
+    const key = `${code}:${option}`;
+    if (this.keys.has(key)) return;
+    this.keys.add(key);
+    this.diagnostics.push(
+      Object.freeze({
+        severity: 'warning',
+        code,
+        option,
+        requested,
+        fallback,
+        message,
+      }),
+    );
+  }
+}
+
+function clampToLimit(
+  log: DiagnosticLog,
+  option: 'lodBudgetSplats' | 'residencyCapacitySplats',
+  value: number,
+  min: number,
+  max: number,
+): number {
+  const effective = Math.min(max, Math.max(min, value));
+  if (effective !== value)
+    log.warn(
+      DiagnosticCode.limitClamped,
+      option,
+      value,
+      effective,
+      `${option} was clamped to the host-supplied limit`,
+    );
+  return effective;
+}
+
+type PolicyPropKey = (typeof policyPropKeys)[number];
+type PolicyPropFields = {
+  -readonly [K in PolicyPropKey]: EffectivePerformancePolicy[K];
+};
+
+function unappliedFields(): PolicyPropFields {
+  return {
+    lodErrorPixels: null,
+    alphaThreshold: null,
+    subpixelThreshold: null,
+    enableFrustumCulling: null,
+    enableHiZOcclusion: null,
+    enableEarlyTermination: null,
+    sortDepth: null,
+  };
+}
+
+// Native reports what it accepts, so the effective values are real, not null. A
+// request outside that support still warns once and falls back on the device.
+function supportedFields(
+  log: DiagnosticLog,
+  requested: PerformancePolicy,
+  support: NativePolicySupport,
+): PolicyPropFields {
+  const fields = unappliedFields() as Record<
+    PolicyPropKey,
+    PerformancePolicy[PolicyPropKey] | null
+  >;
+  for (const option of policyPropKeys) {
+    if (support[option]) fields[option] = requested[option];
+    else if (requested[option] !== nativeDefaults[option]) {
+      log.warn(
+        DiagnosticCode.nativeOptionFallback,
+        option,
+        requested[option],
+        null,
+        `${option} fell back to the native default; read onPolicyEvent for the applied value`,
+      );
+    }
+  }
+  return fields as PolicyPropFields;
+}
+
+// The policy prop carries every field, but only onCapabilities says which ones native
+// applies. Warn only where the request differs from the native default.
+function unknownSupportFields(
+  log: DiagnosticLog,
+  requested: PerformancePolicy,
+): PolicyPropFields {
+  for (const option of policyPropKeys) {
+    if (requested[option] === nativeDefaults[option]) continue;
+    log.warn(
+      DiagnosticCode.nativeSupportUnknown,
+      option,
+      requested[option],
+      null,
+      `${option} support is unknown until native capabilities are supplied`,
+    );
+  }
+  return unappliedFields();
+}
+
+function policyFor(preset: QualityPreset): PerformancePolicy {
+  return Object.freeze({
+    mode: PerformanceMode.auto,
+    preset,
+    ...presets[preset],
+  });
+}
+
+export class SplatKitBuilder {
+  private world?: SplatKitWorldRequest;
+  private paused = false;
+  private performance = policyFor(QualityPreset.balanced);
+
+  withWorld(world: SplatKitWorldRequest): this {
+    for (const key of Object.keys(world)) {
+      if (!worldKeys.has(key)) {
+        throw new TypeError(`${key} must be configured with withPerformance()`);
+      }
+    }
+    this.world = Object.freeze({...world});
+    return this;
+  }
+
+  withRender(options: Readonly<{paused?: boolean}>): this {
+    for (const key of Object.keys(options)) {
+      if (key !== 'paused')
+        throw new TypeError(`${key} must be configured with withPerformance()`);
+    }
+    if (options.paused !== undefined) {
+      if (typeof options.paused !== 'boolean')
+        throw new TypeError('paused must be boolean');
+      this.paused = options.paused;
+    }
+    return this;
+  }
+
+  withPerformance(options: PerformanceOptions): this {
+    for (const key of Object.keys(options)) {
+      if (!optionKeys.has(key))
+        throw new TypeError(`unknown performance option: ${key}`);
+    }
+    const next = {
+      ...this.performance,
+      ...options,
+      mode: PerformanceMode.manual,
+    };
+    validatePolicy(next);
+    this.performance = Object.freeze(next);
+    return this;
+  }
+
+  withPreset(preset: QualityPreset): this {
+    if (!isPreset(preset)) throw new TypeError('invalid performance preset');
+    this.performance = policyFor(preset);
+    return this;
+  }
+
+  build(capabilities: DeviceCapabilities): SplatKitConfiguration {
+    if (!this.world) throw new Error('world is required');
+    validatePolicy(this.performance);
+    validateCapabilities(capabilities);
+
+    const requested = Object.freeze({...this.performance});
+    const log = new DiagnosticLog();
+    const lodBudgetSplats = clampToLimit(
+      log,
+      'lodBudgetSplats',
+      requested.lodBudgetSplats,
+      0,
+      capabilities.limits.maxLodCapacitySplats,
+    );
+    const residencyCapacitySplats = clampToLimit(
+      log,
+      'residencyCapacitySplats',
+      requested.residencyCapacitySplats,
+      capabilities.limits.minResidencyCapacitySplats,
+      capabilities.limits.maxResidencyCapacitySplats,
+    );
+    const shDegree = Math.min(
+      requested.shDegree,
+      this.world.maxShDegree,
+    ) as SHDegree;
+    if (shDegree !== requested.shDegree)
+      log.warn(
+        DiagnosticCode.limitClamped,
+        'shDegree',
+        requested.shDegree,
+        shDegree,
+        'shDegree was capped by the world maxShDegree',
+      );
+
+    const effectiveFields = capabilities.policy
+      ? supportedFields(log, requested, capabilities.policy)
+      : unknownSupportFields(log, requested);
+    if (requested.targetFps !== null) {
+      log.warn(
+        DiagnosticCode.fabricOptionUnavailable,
+        'targetFps',
+        requested.targetFps,
+        null,
+        'targetFps is a request only; adaptive quality is separate',
+      );
+    }
+
+    // Only an absent kind defaults; anything else malformed is validated and rejected below.
+    const kind =
+      this.world.kind === undefined ? WorldKind.file : this.world.kind;
+    const world = Object.freeze({
+      ...this.world,
+      kind,
+      lodCapacitySplats: lodBudgetSplats,
+      residencyCapacitySplats,
+    });
+    const render = Object.freeze({
+      paused: this.paused,
+      renderScale: requested.renderScale,
+      shDegree,
+    });
+    validateWorldRequest(world, capabilities.limits);
+    validateRenderOptions(render);
+    const effective: EffectivePerformancePolicy = Object.freeze({
+      ...effectiveFields,
+      lodBudgetSplats,
+      renderScale: requested.renderScale,
+      shDegree,
+      residencyCapacitySplats,
+      targetFps: null,
+    });
+    return Object.freeze({
+      world,
+      render,
+      performance: Object.freeze({
+        requested,
+        effective,
+        diagnostics: Object.freeze(log.diagnostics.slice()),
+      }),
+    });
+  }
+}

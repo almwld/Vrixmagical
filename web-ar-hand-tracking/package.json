@@ -1,0 +1,65 @@
+{
+  "name": "web-ar-hand-tracking",
+  "version": "1.0.0",
+  "description": "Web-based Augmented Reality app featuring hand-tracking with MediaPipe (in a Web Worker) and 3D figures rendered with Three.js.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Damian Sire <damiansire@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/damiansire/web-ar-hand-tracking.git"
+  },
+  "bugs": "https://github.com/damiansire/web-ar-hand-tracking/issues",
+  "keywords": [
+    "augmented-reality",
+    "mediapipe",
+    "three-js",
+    "hand-tracking",
+    "webworker",
+    "computer-vision"
+  ],
+  "sideEffects": [
+    "**/*.css",
+    "./src/ui/ar-controls.ts",
+    "./src/ui/figure-selector.ts",
+    "./src/ui/experience-selector.ts"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "smoke:webgpu": "node scripts/webgpu-smoke.mjs",
+    "smoke:webgpu:chrome": "node scripts/webgpu-smoke-chrome.mjs",
+    "test:e2e": "playwright test",
+    "perf:harness": "node scripts/perf-harness.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.35",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^26.1.1",
+    "@types/three": "^0.185.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.5.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.6.0",
+    "playwright": "^1.61.1",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9"
+  }
+}

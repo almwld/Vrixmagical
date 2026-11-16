@@ -1,0 +1,101 @@
+name: splatkit-android
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded PR checks; preserve each main commit for the release and mirror gates.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Pull requests run only the jobs their files reach (.github/ci-filters.yml); main runs all.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      scripts: ${{ steps.changes.outputs.scripts }}
+      android: ${{ steps.changes.outputs.android }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - id: changes
+        uses: ./.github/actions/changes
+
+  tooling:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.scripts == 'true') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Check harness regressions
+        run: python3 -m unittest discover -s scripts/tests
+
+  build:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.android == 'true') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: ./.github/actions/android-sdk
+        with:
+          packages: "platforms;android-36 build-tools;36.0.0 cmake;3.22.1"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build the library and the dev app
+        working-directory: apps/android-dev
+        run: ./gradlew :splatkit:assembleRelease :app:assembleRelease :splatkit:testDebugUnitTest --no-daemon
+      - name: Check 16 KB artifact alignment
+        run: |
+          python3 scripts/check_android_alignment.py \
+            --readelf "$ANDROID_HOME/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+            --zipalign "$ANDROID_HOME/build-tools/36.0.0/zipalign" \
+            packages/splatkit-android/build/outputs/aar/splatkit-release.aar \
+            apps/android-dev/app/build/outputs/apk/release/app-release.apk
+      - name: Check world frame completion contract on host
+        run: |
+          mkdir -p build/native-contracts
+          # The runner has no Vulkan headers of its own; the NDK's come last so the host's libc wins.
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+            -I packages/splatkit-android/src/main/cpp \
+            -I packages/splatkit-android/tests \
+            -I packages/splatkit-engine/include -I packages/splat-core/include \
+            -idirafter "$ANDROID_HOME/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" \
+            packages/splatkit-android/tests/rendering/vulkan/presentation/WorldFrameCompletionTest.cpp \
+            packages/splatkit-engine/src/Log.cpp \
+            -o build/native-contracts/world-frame-completion
+          build/native-contracts/world-frame-completion
+      - name: Check surface size wait on host
+        run: |
+          mkdir -p build/native-contracts
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+            -I packages/splatkit-android/src/main/cpp \
+            packages/splatkit-android/tests/rendering/vulkan/presentation/SurfaceSizeWaitTest.cpp \
+            -o build/native-contracts/surface-size-wait
+          build/native-contracts/surface-size-wait
+      - name: Check camera projection on host
+        run: |
+          mkdir -p build/native-contracts
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+            -I packages/splatkit-android/src/main/cpp -I packages/splat-core/include -I packages/splatkit-engine/include \
+            packages/splatkit-android/tests/rendering/vulkan/frame/VulkanCameraProjectionTest.cpp \
+            -o build/native-contracts/camera-projection
+          build/native-contracts/camera-projection
+      - name: Keep the AAR
+        uses: actions/upload-artifact@v7
+        with:
+          name: splatkit-android-release
+          path: packages/splatkit-android/build/outputs/aar/*.aar
+          retention-days: 14

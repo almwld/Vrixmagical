@@ -1,0 +1,140 @@
+# Contributing
+
+SplatKit is experimental and small enough to read in an afternoon.
+Pull requests are welcome.
+Open an issue before starting anything larger than a fix so the scope is agreed first.
+
+## Build the core
+
+```
+cd packages/splat-core
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+`cmake -DSPLAT_CORE_SANITIZE=thread` or `address` builds the sanitized variants CI runs.
+Set `SPLAT_FIXTURES_DIR` to a folder with World Labs example files to run the integration tests.
+`python3 scripts/sdk_harness.py check engine` builds and tests `splatkit-engine`; the [harness](docs/AGENT_HARNESS.md) lists the Metal and Android checks.
+
+## Build and run the Android dev app
+
+Needs Android Studio with NDK 27.1.12297006, an arm64 device or emulator, and a `.spz` plus its collider `.glb` in `apps/android-dev/app/src/main/assets`.
+
+```
+scripts/fetch-validation-layers.sh
+cd apps/android-dev
+./gradlew :app:installDebug
+adb logcat -s SplatKit
+```
+
+Without a run file the app opens the bundled kitchen for interactive use.
+A [run file](scripts/benchmarks/run.schema.json) picks the world, renderer settings, pose and a scripted run, passed whole as the `run` extra:
+
+```
+adb shell am start -n com.splatkit.devapp/.MainActivity --es run \''{"schema_version":1,"world":{"file":"house.spz","collider":"house.glb"}}'\'
+```
+
+Debug builds load the Khronos validation layer; a pull request must leave it silent.
+
+## Build and run the iOS dev app
+
+Needs Xcode 26 with the iOS platform and the Metal toolchain, CMake, [xcodegen](https://github.com/yonaskolb/XcodeGen), an iPhone, and a `.spz` plus its collider `.glb` in `apps/ios-dev/SplatKitDev/Resources`.
+
+```
+scripts/build-ios.sh                      # the static libraries, into build/ios/lib
+cd apps/ios-dev
+xcodegen generate
+xcodebuild -scheme SplatKitDev -configuration Release -destination "id=<device udid>" -allowProvisioningUpdates -derivedDataPath ../../build/ios-dev-derived build
+xcrun devicectl device install app --device <udid> ../../build/ios-dev-derived/Build/Products/Release-iphoneos/SplatKitDev.app
+xcrun devicectl device process launch --device <udid> --console com.splatkit.devapp --run '{"schema_version":1,"world":{"file":"house.spz"}}'
+```
+
+The app takes the same [run file](scripts/benchmarks/run.schema.json) as the Android one, passed whole after `--run`, and reads worlds from its Documents folder, which `devicectl device copy to` fills.
+It refuses an unknown key, a bad value or any other `--` argument and logs `SplatRunInvalid:` with the key.
+`scripts/ios_perf.py` and `scripts/android_perf.py` write the run file for a benchmark and save it beside the results as `run.json`.
+The Objective-C++ sources build with warnings as errors; `scripts/lint-cpp.sh` formats them.
+
+## Build the React Native package
+
+```
+cd packages/react-native-splatkit
+npm ci
+npm run check                # TypeScript, contract tests and Fabric Codegen
+npm run lint                 # ESLint and the Prettier check
+```
+
+`prepare` backports the [braces depth guard](packages/react-native-splatkit/scripts/patches/braces-3.0.3/validate-depth.js) for development tooling; `check` applies and verifies it even after `npm ci --ignore-scripts`.
+`npm audit` still reports upstream `braces@3.0.3`; remove the backport when a compatible fixed version ships.
+
+Adapter changes also need the Android adapter host tests in its [README](packages/react-native-splatkit/android/README.md) and a run of the [React Native example](apps/react-native/README.md) on a device.
+Check build wiring changes in a fresh React Native app outside this repository, installing the `npm pack` tarball.
+`prepack` fetches and checksum-verifies the iOS `SplatKitCore.xcframework`; `SPLATKIT_IOS_XCFRAMEWORK_PATH` substitutes a local `scripts/package-ios.sh` build.
+
+## Release
+
+Bumping a version is the release: merge it to `main` and the workflows publish, tag and mirror on their own.
+[docs/RELEASING.md](docs/RELEASING.md) has the whole flow, including the manual iOS release upload and the CI or local XCFramework build.
+
+## Lint the C++
+
+```
+scripts/lint-cpp.sh          # what CI runs: clang-format check, then clang-tidy
+scripts/lint-cpp.sh --fix    # rewrite the formatting and apply the fixes clang-tidy can
+```
+
+Both tools come from the NDK the project pins, so a machine that builds the library can lint it; `.clang-format` and `.clang-tidy` at the root hold the rules.
+The script configures `splat-core`, `splatkit-engine` and `splatkit-android` for the Android target and lints tests and tools too.
+It also links the Android native tests, so an undefined reference fails CI; [running them on a device](packages/splatkit-android/README.md#native-tests-on-a-device) stays manual.
+`git config core.hooksPath .githooks` installs a pre-push hook that runs `scripts/lint-cpp.sh --format-only`, the seconds-long formatting half of that check.
+VS Code's C/C++ extension reads the compile databases it leaves in `build/lint`, as [.vscode/settings.json](.vscode/settings.json) sets up.
+clang-tidy holds every function to its default cognitive complexity of 25, counting the source as written, so test assertion macros add nothing.
+
+## Lint the TypeScript
+
+```
+npm run lint                 # what CI runs: ESLint, then the Prettier check
+npm run lint:fix             # rewrite the formatting and apply the fixes ESLint can
+```
+
+`packages/react-native-splatkit` and `apps/react-native` both have these scripts; the example's type-aware rules read the package's declarations, so run `npx tsc` in the package first.
+ESLint runs typescript-eslint's strict type-checked rules and eslint-plugin-sonarjs's recommended rules, which hold every function to Sonar's cognitive complexity of 15.
+Prettier formats the code and JSON; Markdown and workflows keep their hand layout.
+[lint-ts.yml](.github/workflows/lint-ts.yml) runs both packages.
+
+## What a pull request needs
+
+CI runs only the jobs a pull request's files reach, per [ci-filters.yml](.github/ci-filters.yml); a merge to `main` runs them all.
+Markdown runs no job, and a file in no filter runs every job unless that file's `unknown` filter exempts it.
+
+- Tests in `splat-core` for anything that touches decoding, sorting, math, navigation, loading or the visibility policy, and in `splatkit-engine` for the render policy or engine orchestration.
+- `scripts/lint-cpp.sh` clean; CI runs it.
+- `npm run check` passing for React Native package changes; CI runs it.
+- `npm run lint` clean in the React Native package and example; CI runs it.
+- A note in the description saying which device and driver it was tried on.
+  Emulator only is fine for logic; renderer changes need a real GPU.
+- No planning or decision documents: explain decisions in the pull request text and in comments beside the code they shape.
+- A description in the [template](.github/PULL_REQUEST_TEMPLATE.md)'s Summary, Evidence and Merge Danger sections.
+- Dependent changes as a GitHub stack, one pull request per concern, with [gh-stack](https://github.com/github/gh-stack).
+- Plain dashes, no em dashes, one sentence per line in Markdown.
+
+## Code layout
+
+`packages/splat-core` has no graphics dependency and is shared by every engine: formats, sorting, the level of detail tree, tile streaming, navigation, file mapping, the world loader and the visibility policy, each with tests.
+`packages/splatkit-engine` is the engine without a graphics API: one `SplatEngine` that owns the camera, the streamer for a tiled world, a `Benchmark` and a `StatsPublisher`, and draws through the `SplatRenderer` interface, which sorts and culls on the GPU; the GPU record layout (`GpuSplat` and the packing) lives here; both renderers share the splat record, while Vulkan can opt into scaled 8-bit SH storage.
+`packages/splatkit-android` owns everything Vulkan and Android: `VulkanSplatRenderer` implements the interface, `AndroidEngine` wires it under the engine, and `jni/` is the boundary to Kotlin and knows nothing else.
+`VulkanSplatRenderer` runs the frame and leaves each job to one folder of `rendering/vulkan/`: `device/` (GPU, memory, pipeline cache, shader modules), `presentation/` (surface, swapchain, render target, frame loop), `world/` (the splats on the GPU), `frame/` (camera uniforms and the per-frame compute), `selection/` (level of detail), `cull/`, `sort/`, `raster/` and `layout/` (records shared with the shaders).
+Its Kotlin has four packages: `com.splatkit` is the public API (`SplatSurfaceView` and the value types), `com.splatkit.engine` the JNI boundary and the render thread, `com.splatkit.input` touch and the gyroscope, and `com.splatkit.ui` the optional HUD and joystick views.
+`packages/splatkit-ios` owns everything Metal and iOS: `MetalSplatRenderer` implements the interface over a `CAMetalLayer` with the same job folders under `rendering/metal/`, plus `diagnostics/` for frame capture, and `engine/SKSplatEngine` is the Objective-C boundary to Swift.
+`Sources/SplatKit` is the Swift layer, laid out like the Kotlin: `engine/` holds the render thread, `input/` touch and motion, and the top level the public API (`SplatMetalView` and one file per value type).
+Each native package's `tests/` mirrors its source folders, so a class's test sits at the same path under `tests/`.
+`packages/react-native-splatkit` is the Fabric package: the builder, contracts and Codegen spec in `src`, a Kotlin adapter over `SplatSurfaceView` in `android` and an Objective-C++ adapter over `SKSplatEngine` in `ios`.
+`apps/` holds the `android-dev` and `ios-dev` dev apps and the `react-native` example, which links the local package and builds Android from source.
+The engine does not know what is hosting it.
+
+## Names
+
+The root object of each layer carries the domain in its name, so a reader who sees it anywhere knows what project it belongs to: `SplatEngine` in C++ and Kotlin, `VulkanSplatRenderer`, `SplatWorldLoader`, `SplatSurfaceView`, `VulkanSplatPipeline`.
+The same thing has the same name on both sides of a boundary: the Kotlin `SplatEngine` wraps the C++ `SplatEngine`, and the JNI symbols are derived from that one name.
+Objects below the root are named for their one job and live in the directory of that job, `rendering/vulkan`, `diagnostics`, `camera`, `jni`, `loading`, `sorting`; nothing sits loose at the root of `cpp/`.
+A name that only says what something is, `Engine`, `Renderer`, `Loader`, is not enough; a name that repeats the directory, `VulkanVulkanContext`, is too much.

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+*.csproj
+*.sln
+*.user
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env

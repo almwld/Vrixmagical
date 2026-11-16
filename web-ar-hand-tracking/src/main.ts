@@ -1,0 +1,400 @@
+/**
+ * Orquestador de la app. Conecta la máquina de estados (dominio puro) con los
+ * shells imperativos: cámara, worker de inferencia, escena Three.js y UI.
+ *
+ * Sólo re-renderiza cuando el `status` cambia, evitando el re-render
+ * destructivo del código original que recreaba componentes en cada evento.
+ */
+import "./styles.css";
+import {
+  INITIAL_STATE,
+  transition,
+  type AppState,
+  type AppEvent,
+} from "./domain/app-state";
+import { DEFAULT_FIGURE, type FigureKind } from "./domain/figures";
+import { experienceHint, type ExperienceKind } from "./domain/experiences";
+import { requestCamera, CameraError } from "./camera/camera";
+import {
+  HandTracker,
+  type InferenceHealth,
+  type InferenceLatencyStats,
+} from "./inference/hand-tracker";
+import { FrameRateLimiter } from "./domain/frame-limiter";
+import type { ARScene } from "./render/ar-scene";
+import { permissionScreen, loadingScreen, errorScreen } from "./ui/screens";
+import { arView, type ARView } from "./ui/ar-view";
+import type { ControlsState } from "./domain/controls";
+import { capturePhoto } from "./render/capture";
+
+const appEl = document.getElementById("app")!;
+
+/** Snapshot de diagnóstico de rendimiento (fps de render + latencia de inferencia). */
+export interface PerfSnapshot {
+  readonly delegate: "GPU" | "CPU" | null;
+  readonly fps: number | null;
+  readonly inference: InferenceLatencyStats | null;
+  /** Salud del pipeline de inferencia (cuadros perdidos, errores de detección). */
+  readonly health: InferenceHealth | null;
+}
+
+declare global {
+  interface Window {
+    /**
+     * Hook de diagnóstico read-only, sin efecto en el comportamiento de la app.
+     * Lo usa `scripts/perf-harness.mjs` para medir FPS/latencia real en el
+     * navegador en vez de instrumentar por fuera; no se expone UI para esto a
+     * propósito (es una herramienta de medición, no una feature de producto).
+     */
+    __arPerfSnapshot?: () => PerfSnapshot;
+  }
+}
+
+window.__arPerfSnapshot = (): PerfSnapshot => ({
+  delegate: tracker?.delegate ?? null,
+  fps: scene?.fps ?? null,
+  inference: tracker?.getLatencyStats() ?? null,
+  health: tracker?.getHealth() ?? null,
+});
+
+let state: AppState = INITIAL_STATE;
+let lastStatus: AppState["status"] | null = null;
+let cameraMessage = "No se pudo acceder a la cámara.";
+
+// Recursos que viven mientras la app está activa.
+let stream: MediaStream | null = null;
+let tracker: HandTracker | null = null;
+let scene: ARScene | null = null;
+let frameActive = false;
+let onResize: (() => void) | null = null;
+// Recursos del modo AR (timers, listeners de los selectores): se agrupan acá para
+// que cleanup() los suelte simétricamente al salir de la vista AR. Sin esto, el
+// setTimeout del hint y los listeners quedaban colgados sobre nodos desconectados.
+let arDisposers: Array<() => void> = [];
+
+/**
+ * Libera cámara, worker, escena, loop de cuadros y listeners. Se llama al
+ * volver a una pantalla sin AR (reintento o error), para no dejar la cámara
+ * prendida ni workers/renderers colgando.
+ */
+function cleanup(): void {
+  frameActive = false;
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
+  tracker?.dispose();
+  tracker = null;
+  scene?.dispose();
+  scene = null;
+  if (onResize) {
+    window.removeEventListener("resize", onResize);
+    onResize = null;
+  }
+  // Suelta timers y listeners del modo AR (hint, selectores, capture).
+  for (const dispose of arDisposers) dispose();
+  arDisposers = [];
+}
+
+function dispatch(event: AppEvent): void {
+  state = transition(state, event);
+  render();
+}
+
+function render(): void {
+  if (state.status === lastStatus) return; // sólo cambiamos pantalla si cambió el status
+  lastStatus = state.status;
+  appEl.replaceChildren();
+
+  switch (state.status) {
+    case "requesting-permission":
+      cleanup();
+      renderPermission();
+      break;
+    case "permission-denied":
+      cleanup();
+      renderError(cameraMessage, () => dispatch({ type: "RETRY" }));
+      break;
+    case "loading-model":
+      appEl.appendChild(loadingScreen());
+      // Precargamos el chunk de Three.js en paralelo con la descarga del modelo,
+      // así su parseo no cae de golpe al pasar a la vista AR (menos "freeze").
+      // Un fallo acá NO se reporta a propósito: es una optimización opcional y el
+      // mismo import se vuelve a hacer (y a manejar) en `renderAR`. Sin el catch
+      // sería una promesa rechazada sin dueño.
+      import("./render/ar-scene").catch(() => {});
+      startModel();
+      break;
+    case "ready":
+      // Nunca `void`: si `renderAR` rechaza (chunk que no baja, fallo inesperado
+      // del montaje) la pantalla queda en blanco para siempre y el error se
+      // pierde como unhandled rejection.
+      renderAR().catch(() => {
+        showFatal(
+          "No se pudo iniciar la vista de realidad aumentada. Recargá la página.",
+        );
+      });
+      break;
+    case "error":
+      cleanup();
+      renderError(state.error ?? "Error inesperado.", () => dispatch({ type: "RETRY" }));
+      break;
+  }
+}
+
+function renderPermission(): void {
+  const { root, button } = permissionScreen();
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Pidiendo acceso…";
+    try {
+      stream = await requestCamera();
+      dispatch({ type: "PERMISSION_GRANTED" });
+    } catch (err) {
+      cameraMessage =
+        err instanceof CameraError ? err.message : "Error desconocido de cámara.";
+      dispatch({ type: "PERMISSION_DENIED" });
+    }
+  });
+  appEl.appendChild(root);
+}
+
+function renderError(message: string, onRetry: () => void): void {
+  const { root, button } = errorScreen(message);
+  button.addEventListener("click", onRetry);
+  appEl.appendChild(root);
+}
+
+/** Error no recuperable (p. ej. sin WebGL): muestra el mensaje y ofrece recargar. */
+function showFatal(message: string): void {
+  appEl.replaceChildren();
+  const { root, button } = errorScreen(message, "Recargar");
+  button.addEventListener("click", () => location.reload());
+  appEl.appendChild(root);
+}
+
+async function startModel(): Promise<void> {
+  tracker = new HandTracker();
+  // Un worker que se muere despues del ready, o una deteccion que falla en bucle,
+  // dejaban la app viva pero ciega: figura clavada, camara prendida y ningun
+  // aviso. Ahora eso degrada al mismo estado de error explicito que el resto.
+  tracker.onInferenceFailure((message) => {
+    dispatch({ type: "INFERENCE_FAILED", message });
+  });
+  try {
+    await tracker.init();
+    dispatch({ type: "MODEL_LOADED" });
+  } catch (err) {
+    dispatch({
+      type: "MODEL_ERROR",
+      message: err instanceof Error ? err.message : "No se pudo cargar el modelo.",
+    });
+  }
+}
+
+/**
+ * Aplica el estado de los controles a los dos consumidores: la escena 3D
+ * (`applyControls`, el contrato UI→render) y el shell de DOM (espejado del
+ * video, fondo de color). Es un único camino usado tanto al montar la vista como
+ * en cada `controls-change`, para que el arranque no pueda divergir del cambio.
+ */
+function applyControlsToScene(view: ARView, c: ControlsState): void {
+  scene?.applyControls(c);
+  // El espejado del overlay (escena) debe coincidir con el del <video>.
+  view.video.style.transform = c.mirrored ? "scaleX(-1)" : "none";
+  // Fondo de color: oculta el video de la cámara y pinta el color elegido
+  // detrás de la figura (equivale al "Background" de la versión original).
+  view.video.style.visibility = c.bgEnabled ? "hidden" : "visible";
+  view.root.style.background = c.bgEnabled ? c.bgColor : "#000";
+}
+
+async function renderAR(): Promise<void> {
+  // Three.js se carga sólo al entrar a la vista AR (code-splitting): las
+  // pantallas de permiso y carga no arrastran ese chunk. Si ese chunk no baja
+  // (red caída, deploy a mitad, caché envenenada) el `await` rechaza y antes eso
+  // dejaba la pantalla en blanco permanente, sin mensaje ni forma de reintentar.
+  let ARScene: typeof import("./render/ar-scene").ARScene;
+  try {
+    ({ ARScene } = await import("./render/ar-scene"));
+  } catch {
+    cleanup();
+    showFatal("No se pudo cargar el motor 3D. Revisá tu conexión y recargá.");
+    return;
+  }
+
+  const view = arView();
+
+  // Crear el renderer puede fallar si el navegador no tiene ni WebGPU ni WebGL2:
+  // lo manejamos con gracia en vez de dejar la app en blanco. `ARScene.create`
+  // intenta WebGPU y cae automáticamente a WebGL2 (puede reemplazar el canvas).
+  let created: ARScene;
+  try {
+    created = await ARScene.create(view.canvas);
+  } catch {
+    cleanup();
+    showFatal("Tu navegador no pudo iniciar WebGPU ni WebGL2, necesarios para el 3D.");
+    return;
+  }
+
+  appEl.appendChild(view.root);
+  // Ahora que el canvas está en el DOM y tiene su tamaño real, ajustamos cámara
+  // y renderer (en el constructor el canvas estaba suelto → tamaño por defecto).
+  created.resize();
+  scene = created;
+
+  if (stream) view.video.srcObject = stream;
+  void view.video.play().catch(() => {});
+
+  scene.setFigure(DEFAULT_FIGURE);
+
+  // Arranque = mismo camino que cualquier cambio posterior. Antes `applyControls`
+  // sólo corría desde el handler de `controls-change`, así que la escena recién se
+  // enteraba del estado del panel cuando el usuario tocaba algo: los defaults del
+  // panel, los de ARScene y los del material coincidían por casualidad.
+  applyControlsToScene(view, view.controls.getState());
+
+  scene.start();
+
+  // Pérdida de contexto WebGL (driver reset, OOM de GPU, crash del proceso de
+  // GPU): degradamos a la pantalla de error en vez de dejar el canvas colgado.
+  scene.setContextLostListener(() => {
+    dispatch({
+      type: "CONTEXT_LOST",
+      message: "Se perdió el contexto WebGL. Recargá para reintentar.",
+    });
+  });
+
+  // Registra un listener y deja su baja en arDisposers (cleanup lo suelta al salir).
+  const on = <T extends EventTarget>(
+    target: T,
+    type: string,
+    handler: EventListener,
+  ): void => {
+    target.addEventListener(type, handler);
+    arDisposers.push(() => target.removeEventListener(type, handler));
+  };
+
+  on(view.selector, "figure-change", (e) => {
+    scene?.setFigure((e as CustomEvent<FigureKind>).detail);
+  });
+
+  // Cartel de instrucción del modo (toast central que se desvanece solo).
+  let hintTimer = 0;
+  arDisposers.push(() => clearTimeout(hintTimer));
+  const showHint = (text: string): void => {
+    if (!text) return;
+    view.hint.textContent = text;
+    view.hint.classList.add("show");
+    clearTimeout(hintTimer);
+    hintTimer = window.setTimeout(() => view.hint.classList.remove("show"), 3500);
+  };
+
+  // HUD de puntaje: la experiencia activa decide qué mostrar (null = ocultar).
+  scene.setHudListener((text) => {
+    view.hud.hidden = text === null;
+    view.hud.textContent = text ?? "";
+  });
+
+  // Cambio de experiencia creativa: activa el modo, muestra/oculta el selector de
+  // figuras (sólo relevante en "figuras") y anuncia la instrucción del modo.
+  on(view.experience, "experience-change", (e) => {
+    const kind = (e as CustomEvent<ExperienceKind>).detail;
+    scene?.setExperience(kind);
+    const figuras = kind === "figuras";
+    // Los sliders/toggles de material sólo aplican a las figuras 3D: fuera de ese
+    // modo, ocultamos tanto el selector de figuras como el panel de controles.
+    view.selector.style.display = figuras ? "" : "none";
+    view.controls.style.display = figuras ? "" : "none";
+    showHint(experienceHint(kind));
+  });
+
+  on(view.controls, "controls-change", (e) => {
+    applyControlsToScene(view, (e as CustomEvent<ControlsState>).detail);
+  });
+
+  on(view.capture, "click", () => {
+    const c = view.controls.getState();
+    // Render explícito en este tick: el canvas queda legible sin depender de
+    // preserveDrawingBuffer. El canvas puede haber sido reemplazado por el
+    // fallback WebGPU→WebGL2, por eso lo tomamos del propio renderer.
+    const glCanvas = scene?.renderForCapture() ?? view.canvas;
+    capturePhoto({
+      video: view.video,
+      glCanvas,
+      mirrored: c.mirrored,
+      background: c.bgEnabled ? c.bgColor : null,
+    });
+  });
+
+  onResize = () => scene?.resize();
+  window.addEventListener("resize", onResize);
+
+  tracker?.onHands((hands) => scene?.setHands(hands));
+
+  startFrameLoop(view.video);
+}
+
+/**
+ * Cadencia objetivo de la INFERENCIA (no del render). El render corre a 60+ fps
+ * en su propio loop; la detección de manos a 30 fps es perceptualmente idéntica
+ * porque el suavizado predictivo One-Euro interpola/extrapola entre updates (ver
+ * `domain/smoothing`). Capar acá libera ~la mitad del trabajo de MediaPipe —el
+ * consumidor #1 de CPU/GPU— en equipos capaces, sin pérdida visible.
+ */
+const INFERENCE_FPS = 30;
+
+/**
+ * Bombea cuadros del video al tracker. Usa `requestVideoFrameCallback` cuando
+ * existe (sólo dispara con cuadros nuevos del video) y cae a `requestAnimationFrame`
+ * si no está disponible. Limita la cadencia de inferencia a `INFERENCE_FPS`
+ * (desacoplada del render): en una fuente/GPU rápida, saltea los cuadros que
+ * sobran en vez de inferir en todos.
+ */
+function startFrameLoop(video: HTMLVideoElement): void {
+  frameActive = true;
+  const hasRVFC = "requestVideoFrameCallback" in video;
+  const limiter = new FrameRateLimiter(INFERENCE_FPS);
+
+  const schedule = () => {
+    if (!frameActive) return; // `cleanup()` corta el loop
+    if (hasRVFC) {
+      (video as VideoFrameCallbackHost).requestVideoFrameCallback(pump);
+    } else {
+      requestAnimationFrame(pump);
+    }
+  };
+
+  const pump = (now: number) => {
+    if (!frameActive) return;
+    // Capamos la inferencia a la cadencia objetivo; el back-pressure del tracker
+    // sigue dropeando si además hay un cuadro en vuelo (doble red).
+    if (video.readyState >= 2 && limiter.shouldProcess(now)) {
+      void tracker?.track(video, now);
+    }
+    schedule();
+  };
+
+  schedule();
+}
+
+// `requestVideoFrameCallback` no está en todas las definiciones de TS.
+interface VideoFrameCallbackHost {
+  requestVideoFrameCallback(cb: (now: number) => void): number;
+}
+
+/**
+ * Última red: cualquier error o promesa rechazada que nadie manejó y que dejó la
+ * página muda (sin nada montado en `#app`) se convierte en una pantalla con
+ * mensaje y botón de recargar. Una app que pide la cámara y se queda en blanco
+ * sin decir nada es el peor final posible; esto no reemplaza al manejo puntual de
+ * cada boundary, lo respalda.
+ */
+function installLastResortErrorScreen(): void {
+  const paintIfBlank = (): void => {
+    if (appEl.childElementCount > 0) return;
+    showFatal("Algo falló al iniciar la aplicación. Recargá la página.");
+  };
+  window.addEventListener("unhandledrejection", paintIfBlank);
+  window.addEventListener("error", paintIfBlank);
+}
+
+installLastResortErrorScreen();
+render();

@@ -1,0 +1,66 @@
+name: lint-ts
+
+# Separate from lint.yml, which the Android mirror ships without these packages.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded PR checks; preserve each main commit for the release gate.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Pull requests run only the jobs their files reach (.github/ci-filters.yml); main runs all.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rn-package: ${{ steps.changes.outputs.rn-package }}
+      rn-app: ${{ steps.changes.outputs.rn-app }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - id: changes
+        uses: ./.github/actions/changes
+
+  package:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.rn-package == 'true') }}
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: packages/react-native-splatkit
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.21.0"
+          cache: npm
+          cache-dependency-path: packages/react-native-splatkit/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+
+  example:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.rn-app == 'true') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.21.0"
+          cache: npm
+          cache-dependency-path: |
+            packages/react-native-splatkit/package-lock.json
+            apps/react-native/package-lock.json
+      # The example's type-aware rules read the package's declarations from its build.
+      - run: npm ci --ignore-scripts && npx tsc
+        working-directory: packages/react-native-splatkit
+      - run: npm ci --ignore-scripts && npm run lint
+        working-directory: apps/react-native

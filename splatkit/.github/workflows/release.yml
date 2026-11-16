@@ -1,0 +1,105 @@
+name: release
+
+# The version in packages/splatkit-android/build.gradle.kts is the release trigger: a merge to
+# main that changes it publishes the new version to Maven Central and tags the commit. Maven
+# Central takes ten minutes or more to appear on repo1, so the decision is made from the diff
+# rather than by asking the registry what exists, which would race with its own mirror.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - id: state
+        name: Decide whether the version changed
+        run: |
+          coordinates() {
+            git show "$1:packages/splatkit-android/build.gradle.kts" 2>/dev/null \
+              | sed -n 's/.*coordinates(.*"splatkit-android", "\([^"]*\)").*/\1/p'
+          }
+          version=$(coordinates HEAD)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          elif [ "$version" = "$(coordinates HEAD^)" ]; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "splatkit-android stays at $version; nothing to release."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The test workflows run alongside this one on the same push; publishing to Maven
+      # Central is irreversible, so wait for them rather than shipping a broken commit.
+      - name: Wait for the tests on this commit
+        if: steps.state.outputs.new == 'true'
+        run: scripts/wait-for-checks.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAIT_WORKFLOWS: android.yml core.yml engine.yml ios.yml lint.yml lint-ts.yml rn-contract.yml
+
+      - uses: actions/setup-java@v6
+        if: steps.state.outputs.new == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: ./.github/actions/android-sdk
+        if: steps.state.outputs.new == 'true'
+        with:
+          packages: "platforms;android-36 build-tools;36.0.0 cmake;3.22.1"
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.state.outputs.new == 'true'
+
+      # Without this a missing secret fails deep inside Gradle with an opaque error.
+      - name: Check the release secrets exist
+        if: steps.state.outputs.new == 'true'
+        run: |
+          missing=0
+          for secret in MAVEN_CENTRAL_USERNAME MAVEN_CENTRAL_PASSWORD SIGNING_KEY SIGNING_KEY_PASSWORD; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::$secret is not set; release.yml cannot publish."
+              missing=1
+            fi
+          done
+          exit $missing
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+
+      - name: Upload the release to Maven Central
+        if: steps.state.outputs.new == 'true'
+        working-directory: apps/android-dev
+        run: ./gradlew :splatkit:publishToMavenCentral --no-daemon
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+
+      - name: Tag the release commit
+        if: steps.state.outputs.new == 'true'
+        run: |
+          if git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already tagged."
+            exit 0
+          fi
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          # Not --prerelease: every pre-1.0 release is a prerelease, and marking them prerelease
+          # left the releases page advertising an older version as Latest.
+          gh release create "v$VERSION" --title "SplatKit Android $VERSION" --generate-notes
+        env:
+          VERSION: ${{ steps.state.outputs.version }}
+          GH_TOKEN: ${{ github.token }}

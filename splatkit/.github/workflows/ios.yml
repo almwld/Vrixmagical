@@ -1,0 +1,48 @@
+name: splatkit-ios
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded PR checks; preserve each main commit for the release and mirror gates.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Pull requests run only the jobs their files reach (.github/ci-filters.yml); main runs all.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ios: ${{ steps.changes.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - id: changes
+        uses: ./.github/actions/changes
+
+  # The Metal code and its tests build on macOS; the device library is the same source
+  # with the iOS toolchain flags, built here to keep it compiling.
+  test:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ios == 'true') }}
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure (macOS, tests)
+        run: cmake -S packages/splatkit-ios -B build/ios-mac -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/ios-mac --parallel
+      - name: Test
+        run: ctest --test-dir build/ios-mac --output-on-failure
+      - name: Build for iOS
+        run: scripts/build-ios.sh
+      # The simulator SDK has no MetalFX, so code guarded for it compiles differently there.
+      - name: Build for the iOS simulator
+        run: scripts/build-ios.sh Release iphonesimulator

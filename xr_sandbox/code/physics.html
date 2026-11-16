@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Homework 4: Physics Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Inter', sans-serif;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(5px);
+            pointer-events: none;
+        }
+
+        h1 {
+            margin: 0 0 5px 0;
+            font-size: 1.2rem;
+        }
+
+        .key {
+            background: #444;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/",
+            "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js",
+            "cannon-es-debugger": "https://cdn.jsdelivr.net/npm/cannon-es-debugger@1.0.0/dist/cannon-es-debugger.js"
+        }
+    }
+    </script>
+</head>
+
+<body>
+    <div id="overlay">
+        <h1>Homework 4: Physics Simulation</h1>
+        <p>
+            <span class="key">S</span> Sphere &nbsp;
+            <span class="key">B</span> Box &nbsp;
+            <!-- TODO: uncomment below once spawnR() is fully implemented -->
+            <span class="key">R</span> Rutgers R &nbsp;
+            <span class="key">C</span> Clear &nbsp;
+            <span class="key">D</span> Debug
+        </p>
+        <p id="debug" style="color:#ff6b6b">Debug: OFF</p>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+        import CannonDebugger from 'cannon-es-debugger';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // Three.js setup
+        const visualScene = new THREE.Scene();
+        visualScene.background = new THREE.Color(0x1a1a2e);
+
+        const aspect = window.innerWidth / window.innerHeight;
+        const mainCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
+        // mainCamera.position.set(0, 5, 12);
+
+        mainCamera.position.set(10, 5, 10);
+        mainCamera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        visualScene.add(new THREE.AmbientLight(0x404040, 2));
+        const light = new THREE.DirectionalLight(0xffffff, 5);
+        light.position.set(0, 15, 10);
+        light.castShadow = true;
+
+        light.shadow.camera.left = -20;
+        light.shadow.camera.right = 20;
+        light.shadow.camera.top = 20;
+        light.shadow.camera.bottom = -20;
+        light.shadow.camera.near = 0.5;
+        light.shadow.camera.far = 50;
+        light.shadow.mapSize.width = 1024;
+        light.shadow.mapSize.height = 1024;
+
+        visualScene.add(light);
+
+        // Cannon-ES physics world
+        const physicsWorld = new CANNON.World();
+        physicsWorld.gravity.set(0, -9.82, 0);
+
+        const matBounce = new CANNON.Material('bouncy');
+        const matFloor = new CANNON.Material('floor');
+
+        const contactMat = new CANNON.ContactMaterial(matBounce, matFloor, {
+            friction: 0.3,
+            restitution: 0.7
+        });
+        physicsWorld.addContactMaterial(contactMat);
+
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(30, 30);
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x333333,
+            roughness: 0.8
+        });
+        const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+        floorMesh.rotation.x = -Math.PI / 2;
+        floorMesh.receiveShadow = true;
+        visualScene.add(floorMesh);
+
+        const floorBody = new CANNON.Body({
+            mass: 0, // static
+            shape: new CANNON.Plane(),
+            material: matFloor
+        });
+        floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        physicsWorld.addBody(floorBody);
+
+        // Platform
+        const platformWidth = 3;
+        const platformHeight = 0.3;
+        const platformDepth = 3;
+
+        const platformMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(platformWidth, platformHeight, platformDepth),
+            new THREE.MeshStandardMaterial({ color: 0x3377ff })
+        );
+        platformMesh.position.set(0, 0.15, -3);
+        platformMesh.castShadow = true;
+        visualScene.add(platformMesh);
+
+        const platformShape = new CANNON.Box(new CANNON.Vec3(platformWidth / 2, platformHeight / 2, platformDepth / 2));
+        const platformBody = new CANNON.Body({
+            mass: 0,
+            material: matFloor
+        });
+        platformBody.addShape(platformShape);
+        platformBody.position.set(0, 0.15, -3);
+        physicsWorld.addBody(platformBody);
+
+
+        const objects = []; // Stores { mesh, body }
+
+        function createCube() {
+            const pos = {
+                x: (Math.random() - 0.5) * 5,
+                y: 5,
+                z: (Math.random() - 0.5) * 5
+            };
+
+            // Visual Cube
+            const size = 0.6; // Full width
+            const cubeMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(size, size, size),
+                new THREE.MeshStandardMaterial({ color: 0xffaa00 })
+            );
+            cubeMesh.position.set(pos.x, pos.y, pos.z);
+            cubeMesh.castShadow = true;
+            visualScene.add(cubeMesh);
+
+            // Physics Body for Cube
+            const cubeBody = new CANNON.Body({
+                mass: 1,
+                // CORRECTED
+                shape: new CANNON.Box(new CANNON.Vec3(size / 2, size / 2, size / 2)),
+                material: matBounce
+            });
+            cubeBody.position.copy(cubeMesh.position);
+            physicsWorld.addBody(cubeBody);
+
+            objects.push({ mesh: cubeMesh, body: cubeBody, type: 'box' });
+        }
+
+        function createSphere() {
+            const pos = {
+                x: (Math.random() - 0.5) * 5,
+                y: 5,
+                z: (Math.random() - 0.5) * 5
+            };
+
+            // Visual Sphere
+            const radius = 0.3;
+            const sphereMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(radius, 32, 32),
+                new THREE.MeshStandardMaterial({ color: 0x00ffaa })
+            );
+            sphereMesh.position.set(pos.x, pos.y, pos.z);
+            sphereMesh.castShadow = true;
+            visualScene.add(sphereMesh);
+
+            // Physics Body for Sphere
+            const sphereBody = new CANNON.Body({
+                mass: 1,
+                // CORRECTED
+                shape: new CANNON.Sphere(radius),
+                material: matBounce
+            });
+            sphereBody.position.copy(sphereMesh.position);
+            physicsWorld.addBody(sphereBody);
+
+            objects.push({ mesh: sphereMesh, body: sphereBody, type: 'sphere' });
+        }
+
+        // RutgersR
+        let rModel = null;
+        let rHalfExtents = null;
+
+        // Load the RutgersR GLB model
+        // GLTFLoader.load( url : string, onLoad : function, onProgress : onProgressCallback, onError : onErrorCallback )
+        // Checkout https://threejs.org/docs/#GLTFLoader.load
+        const loader = new GLTFLoader();
+        loader.load('../media/RutgersR.glb', (gltf) => {
+            rModel = gltf.scene;
+
+            // 1. Scale the model template ONCE. 
+            rModel.scale.set(0.5, 0.5, 0.5);
+
+            // 2. Enable Shadows
+            rModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                }
+            });
+
+            // 3. Calculate bounding box of the scaled model
+            const box = new THREE.Box3().setFromObject(rModel);
+            const size = new THREE.Vector3();
+            box.getSize(size);
+
+            // 4. Store the correct physics extents (half-sizes)
+            rHalfExtents = new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2);
+
+            console.log("Rutgers R Loaded. Scaled Dimensions:", size);
+            console.log("Rutgers R Loaded.", rModel);
+        }, undefined, (error) => {
+            console.log("RutgersR.glb not found. Skipping.");
+        });
+
+
+        // TODO: Implement spawnR()
+        function spawnR() {
+            if (!rModel || !rHalfExtents) return;
+
+            const x = (Math.random() - 0.5) * 5;
+            const y = 6;
+            const z = (Math.random() - 0.5) * 5;
+
+            const mesh = rModel.clone();
+            mesh.position.set(x, y, z);
+            visualScene.add(mesh);
+
+            const body = new CANNON.Body({
+                mass: 1,
+                shape: new CANNON.Box(rHalfExtents),
+                material: matBounce
+            });
+
+            body.position.set(x, y, z);
+            physicsWorld.addBody(body);
+
+            objects.push({ mesh, body, type: 'rutgersR' });
+        }
+        
+        function clearScene() {
+            objects.forEach(obj => {
+                visualScene.remove(obj.mesh);
+                physicsWorld.removeBody(obj.body);
+            });
+            objects.length = 0;
+        }
+
+        // Debugging tools
+        const debugGroup = new THREE.Group();
+        debugGroup.visible = false;
+        visualScene.add(debugGroup);
+
+        const cannonDebugger = CannonDebugger(debugGroup, physicsWorld);
+        let isDebugVisible = false;
+
+        const clock = new THREE.Clock();
+
+        // Main loop
+        function renderLoop() {
+            const dt = clock.getDelta();
+
+            physicsWorld.step(1 / 60, dt, 3);
+
+            objects.forEach(obj => {
+                obj.mesh.position.copy(obj.body.position);
+                obj.mesh.quaternion.copy(obj.body.quaternion);
+            });
+
+            if (isDebugVisible) {
+                cannonDebugger.update();
+            }
+            renderer.render(visualScene, mainCamera);
+        }
+        renderer.setAnimationLoop(renderLoop);
+
+        // Input controls
+        window.addEventListener('keydown', (e) => {
+            switch (e.key.toLowerCase()) {
+                case 's':
+                    createSphere();
+                    break;
+                case 'b':
+                    createCube();
+                    break;
+                // TODO: uncomment below once spawnR() is fully implemented 
+                case 'r':
+                    spawnR();
+                    break;
+                case 'c':
+                    clearScene();
+                    break;
+                case 'd':
+                    isDebugVisible = !isDebugVisible;
+                    debugGroup.visible = isDebugVisible;
+
+                    const statusEl = document.getElementById('debug');
+                    statusEl.textContent = isDebugVisible ? "Debug: ON" : "Debug: OFF";
+                    statusEl.style.color = isDebugVisible ? "#00ff00" : "#ff6b6b";
+                    break;
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            mainCamera.aspect = window.innerWidth / window.innerHeight;
+            mainCamera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>

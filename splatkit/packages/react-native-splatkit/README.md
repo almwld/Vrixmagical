@@ -1,0 +1,552 @@
+# SplatKit for React Native
+
+Real-time 3D Gaussian splatting in a React Native view, rendered natively on Metal and Vulkan.
+Point `SplatKitView` at an `.spz` file on disk, give it a collider, and walk through the scene.
+
+[![npm](https://img.shields.io/npm/v/@splatkit/react-native/next.svg)](https://www.npmjs.com/package/@splatkit/react-native)
+[![license: MIT](https://img.shields.io/npm/l/@splatkit/react-native.svg)](https://github.com/Xget7/react-native-splatkit/blob/main/LICENSE)
+[![platform: iOS | Android](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey.svg)](#requirements)
+[![architecture: Fabric](https://img.shields.io/badge/architecture-Fabric-blueviolet.svg)](#requirements)
+
+![Walking a Gaussian splat capture in the example app](https://raw.githubusercontent.com/Xget7/splatkit/main/docs/media/example-walk.gif)
+
+> **Beta.**
+> The API may still change before 1.0, and every release so far is a prerelease published under the `next` dist-tag.
+> Verified on physical devices only: an iPhone 17 Pro and a Xiaomi Mi 9 (Adreno 640).
+
+## Contents
+
+- [Why](#why)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Preparing a world](#preparing-a-world)
+- [Quick start](#quick-start)
+- [Loading a world](#loading-a-world)
+- [Navigation](#navigation)
+- [Quality and performance](#quality-and-performance)
+- [API reference](#api-reference)
+- [Error codes](#error-codes)
+- [Troubleshooting](#troubleshooting)
+- [Example app](#example-app)
+- [Related](#related)
+
+## Why
+
+- **Native, not a port.** Metal on iOS and Vulkan on Android, behind one Fabric component. No WebGL, no WebView, no JS renderer.
+- **No bytes cross the bridge.** The view reads the world from an absolute local path and never receives splat data from JavaScript.
+- **It scales down.** Hierarchical LOD and residency streaming with budgets you set, so a 6M splat capture runs on a phone from 2019.
+- **It tells you what it did.** Every quality request is validated natively and reported back through `onCapabilities` and `onPolicyEvent`, with diagnostics for each fallback. Nothing degrades silently.
+- **Walking is real collision.** Load a collider mesh and the camera becomes a character that stands on floors, is blocked by walls and climbs steps.
+- **The UI is yours.** The SDK draws no joystick, no HUD and no buttons. It exposes commands and events; you build the controls.
+
+## Requirements
+
+| | Minimum |
+| --- | --- |
+| React Native | `0.87` or newer (peer dependency `>=0.87.0 <0.89.0`; only 0.87.1 is validated) |
+| React | `^19.2.3` |
+| Architecture | New Architecture (Fabric). `SplatKitView` has no legacy bridge fallback. |
+| iOS | 17.0+, Apple GPU family 7 (A14/M1 or newer), Xcode with CocoaPods |
+| Android | API 29+, Vulkan 1.1, `arm64-v8a` only |
+| Node | `^22.13.0`, `^24.3.0` or `>=26.0.0` |
+
+React Native 0.87 is the minimum.
+The adapter is Fabric-only and relies on the 0.87 template's iOS 26 scene lifecycle, and only 0.87.1 is validated; older releases fail to resolve the peer dependency or to build.
+
+Run it on a physical device.
+The renderer's shaders use SIMD prefix reductions, which the iOS Simulator does not implement, so it reports `Metal is unavailable on this device` and loads nothing.
+Emulators are not a supported target on either platform.
+
+This README describes current source.
+Changes listed under Unreleased in the [changelog](CHANGELOG.md), including `sourceFrame`, require matching native source builds; the published beta.2 package and its pinned XCFramework predate them.
+
+## Installation
+
+```sh
+npm install @splatkit/react-native@next
+cd ios && pod install
+```
+
+The `@next` tag names the newest prerelease; until 1.0, `latest` follows it.
+
+**iOS.**
+The podspec vendors `SplatKitCore.xcframework`, which is fetched and checksum-verified when the package is packed, so there is nothing to build.
+iOS 26 terminates apps that skip the UIScene lifecycle, so a React Native 0.87 template app needs a scene delegate; the [example app](https://github.com/Xget7/splatkit/tree/main/apps/react-native) has one.
+
+**Android.**
+The module autolinks through the app's `com.facebook.react` Gradle plugin, which also runs Fabric Codegen, and pulls `io.github.xget7:splatkit-android` from Maven Central.
+Set `minSdkVersion = 29` and `reactNativeArchitectures=arm64-v8a` in the host app.
+
+## Preparing a world
+
+The view reads `.spz` and `.lodsplat` files and tilesets of `.spz` tiles, never `.ply`, so a scene is prepared on your computer before it reaches the phone.
+
+- **[World Labs Marble](https://docs.worldlabs.ai/marble/export/specs#gaussian-splats) exports** need no preparing: the SPZ is the world, loaded with `sourceFrame: CoordinateFrame.rdf` because it does not declare its frame, and the collider GLB makes it walkable.
+- **Any Gaussian splat PLY**, from SuperSplat, Polycam or a 3DGS training run, goes through `scripts/prepare-world.sh` in the SplatKit repository:
+
+```sh
+git clone https://github.com/Xget7/splatkit && cd splatkit
+scripts/prepare-world.sh ~/scene.ply out/ --collider
+```
+
+It needs CMake 3.22 or newer and a C++17 compiler; Xcode's is enough.
+The first run builds the conversion tools, and every run ends by printing which file goes in `world.filePath` and which in `collider.filePath`.
+
+| Flag | Writes | Use it for |
+| --- | --- | --- |
+| none | `out/scene.spz` | Every scene; this is the world. |
+| `--collider` | `out/scene.collider.glb` | Walking. It assumes a space to walk through, not a lone object. |
+| `--lod` | `out/scene.lodsplat`, which becomes the world | Scenes of several million splats: the level-of-detail tree is built here instead of on the phone at load time. |
+| `--tiles` | `out/scene.tiles/`, a `tileset.json` index and its tiles | Scenes bigger than phone memory, or a large area to walk: the detail tree is cut into chunks of at most 65536 splats with up to 4 children each, and only the chunks the camera needs are resident. |
+| `--sh N` | | Keeping spherical harmonics up to degree N, 0 to 3. Each degree dropped makes smaller files and uses less GPU memory. |
+| `--spz-version N` | `out/scene.spz` | Selecting container version 2, 3 or 4; PLY conversion defaults to 2. |
+| `--source-frame F` | `out/scene.spz` | Input written in frame F, any three letters such as `rdf` or `rfu`. The SPZ is written in the spec default `rub`, so it loads with no `sourceFrame`. |
+
+On an iPhone 17 Pro, a 12M-splat SPZ at SH1 needs about 4.6 GB to load with only 3.5 GB free, so the load fails with `WORLD_LOAD_FAILED` saying so instead of the app being killed.
+The same scene prepared with `--lod --sh 1` loaded in about 4 seconds, peaking near 2.7 GB.
+A `.lodsplat` is uncompressed, so it is many times the SPZ: 1.25 GB against 214 MB for that scene.
+The script's header and the [splat-core tools](https://github.com/Xget7/splatkit/tree/main/packages/splat-core#converting-a-ply) cover the remaining options.
+`prepare-world.sh` copies an SPZ it has nothing to convert, so an untagged one written in another frame needs `--source-frame` here or `sourceFrame` at load; a container version does not identify the coordinate frame.
+
+## Quick start
+
+```tsx
+import {useMemo, useState} from 'react';
+import {StyleSheet} from 'react-native';
+import {
+  QualityPreset,
+  SplatKitBuilder,
+  SplatKitView,
+  conservativeCapabilities,
+  nativeCapabilitiesFromEvent,
+  toNativeViewProps,
+} from '@splatkit/react-native';
+
+export function Scene({worldPath}: {worldPath: string}) {
+  // An engine reports its real limits through onCapabilities, and those arrive only once it
+  // exists. Build the first request against conservativeCapabilities, the narrowest limits
+  // every shipped adapter accepts, then rebuild when the real ones arrive.
+  const [capabilities, setCapabilities] = useState(conservativeCapabilities);
+
+  const configuration = useMemo(
+    () =>
+      new SplatKitBuilder()
+        .withWorld({requestId: 'lobby', filePath: worldPath, maxShDegree: 3})
+        .withPreset(QualityPreset.balanced)
+        .build(capabilities),
+    [worldPath, capabilities],
+  );
+
+  return (
+    <SplatKitView
+      style={StyleSheet.absoluteFill}
+      {...toNativeViewProps(configuration)}
+      onCapabilities={event =>
+        setCapabilities(nativeCapabilitiesFromEvent(event.nativeEvent))
+      }
+    />
+  );
+}
+```
+
+That renders the world and lets one finger drag to look around.
+Walking needs a collider, which [Navigation](#navigation) covers.
+
+Do not ask for limits above `conservativeCapabilities` before the first `onCapabilities` arrives.
+A request an adapter rejects is refused before any engine exists, so no capabilities event ever follows and the view has no way to tell you what it wanted instead.
+
+## Loading a world
+
+`filePath` must be an absolute, readable local path, never a URL, a `require()` asset or a content URI.
+A `.spz` or `.lodsplat` file is decoded whole at load.
+A tileset loads with `kind: WorldKind.tileset` and `filePath` naming its `tileset.json`: only the index is read at load, and tiles stream in as the camera needs them, within `residencyCapacitySplats`.
+[Preparing a world](#preparing-a-world) turns a PLY into any of them.
+
+`sourceFrame` names where the file's +X, +Y and +Z point, three letters from r, l, u, d, b, f along distinct axes, such as `CoordinateFrame.rdf` for OpenCV and COLMAP.
+Absent, each file uses the frame it declares, else its format's default, `rub` for SPZ and glTF.
+It applies to the world's tiles and to a collider loaded with it; a `.lodsplat` is already converted and ignores it.
+`parseCoordinateFrame(letters)` turns a string from elsewhere into a `CoordinateFrame`, or null.
+
+`world` is a transaction, not a setting.
+Native reloads when `requestId` changes and ignores every other edit to the object, so changing a load-time budget means changing the id too.
+
+### The lens
+
+`fieldOfViewDegrees` (vertical, 10 to 120) and the depth range `nearPlane`/`farPlane` (world units, set both or neither) are optional `world` fields.
+Absent, native keeps its default of 65 degrees and 0.05 to 200.
+The default orbit frames the world through whichever lens is in effect.
+The far plane may be at most 100,000 times the near one; past that the shaders lose it to float precision.
+Splats past the far plane are not drawn, so a world larger than 200 units needs a farther one.
+16-bit sort keys tie depths within 0.024 % of each other and everything past 65,536 times the near plane, so pair a far plane beyond that with a 32-bit `sortDepth`.
+
+### Getting a world file onto a device
+
+Worlds are not bundled with the app.
+Push one into the app's sandbox and point `filePath` at it.
+
+```sh
+# Android, into the app's external files directory
+adb push world.spz /sdcard/Android/data/<your.application.id>/files/world.spz
+
+# iOS, into the app's Documents directory on a connected device
+xcrun devicectl device copy to --device <device-id> --domain-type appDataContainer \
+  --domain-identifier <your.bundle.id> --source world.spz --destination Documents/world.spz
+```
+
+A tileset is a folder whose index names its tiles relative to itself: copy the whole folder the same way and point `filePath` at the `tileset.json` inside it.
+`adb push` nests a folder inside one that already exists, so remove an old copy first.
+
+Restart the app after copying a new world.
+
+## Navigation
+
+The SDK ships no navigation UI.
+`SplatKitView` handles a one-finger drag to look; every other control is yours to draw.
+
+1. Load a collider mesh through the `collider` prop, `{requestId, filePath}`, pointing at an absolute path to a collider GLB.
+2. Show your controls when `onColliderEvent` reports `ColliderPhase.ready`. `ColliderPhase.failed` carries `errorCode` and `message`.
+3. Shape the walker with the `character` prop, `{eyeHeight, bodyRadius, stepHeight}` in meters, applied immediately and to any collider loaded later.
+4. Drive the camera with `SplatKitCommands`.
+
+Commands go straight to the native view and bypass React's render and commit cycle, so a stick can steer at touch rate without a re-render per frame.
+
+```tsx
+import {useCallback, useRef, useState} from 'react';
+import {PanResponder, View} from 'react-native';
+import {ColliderPhase, SplatKitCommands, SplatKitView} from '@splatkit/react-native';
+
+const WALK_SPEED = 1.4; // meters per second at full deflection
+const RADIUS = 62;
+const clamp = (value: number) => Math.max(-1, Math.min(1, value));
+
+export function WalkableScene(props: {worldPath: string; colliderPath: string}) {
+  const view = useRef<React.ComponentRef<typeof SplatKitView>>(null);
+  const [walking, setWalking] = useState(false);
+
+  const stick = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderMove: (_event, gesture) => {
+        const target = view.current;
+        if (!target) return;
+        SplatKitCommands.setWalkVelocity(
+          target,
+          clamp(-gesture.dy / RADIUS) * WALK_SPEED,
+          clamp(gesture.dx / RADIUS) * WALK_SPEED,
+        );
+      },
+      onPanResponderRelease: () => {
+        const target = view.current;
+        if (target) SplatKitCommands.setWalkVelocity(target, 0, 0);
+      },
+    }),
+  ).current;
+
+  const onColliderEvent = useCallback(
+    (event: {nativeEvent: {phase: ColliderPhase}}) =>
+      setWalking(event.nativeEvent.phase === ColliderPhase.ready),
+    [],
+  );
+
+  return (
+    <>
+      <SplatKitView
+        ref={view}
+        world={{requestId: 'world', filePath: props.worldPath}}
+        collider={{requestId: 'floor', filePath: props.colliderPath}}
+        character={{eyeHeight: 1.5, bodyRadius: 0.35, stepHeight: 0.35}}
+        onColliderEvent={onColliderEvent}
+      />
+      {walking && <View {...stick.panHandlers} style={{width: RADIUS * 2, height: RADIUS * 2}} />}
+    </>
+  );
+}
+```
+
+An empty `collider.requestId` releases walk mode and returns the camera to free look.
+
+### Declarative camera
+
+`camera` is an immutable transaction; use a new positive revision for each change.
+`toNativeCameraProp` validates the public discriminated request and produces Fabric's flat transport.
+
+```tsx
+import {CameraMode, SplatKitView, toNativeCameraProp} from '@splatkit/react-native';
+
+const camera = toNativeCameraProp({
+  revision: 1,
+  mode: CameraMode.orbit,
+  anchor: {x: 0, y: 1, z: 0},
+  radius: 4,
+  azimuth: 0,
+  elevation: 0.2,
+  orbitRadiansPerSecond: 0.2,
+});
+
+<SplatKitView world={world} camera={camera}
+  onCameraEvent={({nativeEvent}) => console.log(nativeEvent)} />;
+```
+
+Distances are metres; angles are radians; the continuous rate is signed radians per second, with zero stopping rotation.
+Native validates atomically and reports `applied` or `rejected`, the revision, and the effective state, including clamped elevation.
+An invalid request preserves the current camera and the last accepted request.
+A request waits for world preparation and is reapplied when the engine is replaced.
+Repeating the current revision or omitting the prop does not reset the camera.
+Commands can move it until a new revision arrives; manual navigation cancels automatic rotation.
+Use `{revision: 2, mode: CameraMode.firstPerson}` to leave orbit at the current pose.
+A collider controls whether first person walks or flies.
+`onCameraEvent` is an application-time snapshot; use `onCameraPose` for throttled observation.
+See [the contracts](src/contracts.ts) for the exact request and event types.
+
+### Worklet camera paths
+
+Reanimated is optional and belongs to the host app; the SDK does not import it.
+Install compatible Reanimated and Worklets versions and configure the [Worklets Babel plugin](https://docs.swmansion.com/react-native-reanimated/docs/fundamentals/getting-started/).
+Wrap the host component so an animated ref can dispatch Fabric commands on the UI thread.
+
+```tsx
+import Animated, {dispatchCommand, useAnimatedRef, useFrameCallback} from 'react-native-reanimated';
+import {SplatKitView} from '@splatkit/react-native';
+
+const AnimatedSplatKitView = Animated.createAnimatedComponent(SplatKitView);
+
+function CameraPath({world}) {
+  const ref = useAnimatedRef<React.ComponentRef<typeof SplatKitView>>();
+  const frames = useFrameCallback(({timeSinceFirstFrame}) => {
+    const seconds = timeSinceFirstFrame / 1000;
+    dispatchCommand(ref, 'setCameraPose', [Math.sin(seconds), 2, Math.cos(seconds), seconds, 0]);
+  }, false);
+  return <AnimatedSplatKitView ref={ref} world={world}
+    onWorldEvent={({nativeEvent}) => frames.setActive(nativeEvent.phase === 'frameReady')}
+    onTouchStart={() => frames.setActive(false)} />;
+}
+```
+
+Keep every trajectory helper worklet-compatible and stop the callback on world replacement or unmount.
+`setCameraPose` still obeys first-person collider constraints; use a collider-free world for an unconstrained flythrough.
+See the [complete example](https://github.com/Xget7/splatkit/blob/main/apps/react-native/src/App.tsx) and its [trajectory](https://github.com/Xget7/splatkit/blob/main/apps/react-native/src/Flythrough.ts).
+The UI-thread dispatch API is documented by [Reanimated](https://docs.swmansion.com/react-native-reanimated/docs/advanced/dispatchCommand/).
+
+## Quality and performance
+
+`SplatKitBuilder` resolves what you ask for against what the host and the adapter allow, and returns a `SplatKitConfiguration` carrying `world`, `render` and `performance` (`requested`, `effective`, `diagnostics`).
+
+```ts
+import {
+  QualityPreset,
+  SplatKitBuilder,
+  toNativePolicyProp,
+  toNativeViewProps,
+} from '@splatkit/react-native';
+
+const configuration = new SplatKitBuilder()
+  .withWorld({requestId: 'lobby-1', filePath: '/absolute/path/lobby.spz', maxShDegree: 3})
+  .withPreset(QualityPreset.high)
+  .withPerformance({lodBudgetSplats: 2_500_000})
+  .build(capabilities);
+
+// <SplatKitView {...toNativeViewProps(configuration)} policy={toNativePolicyProp(configuration, revision)} />
+```
+
+- `withWorld()` takes world identity, file path, an optional `kind`, the load-time maximum SH degree, an optional [`sourceFrame`](#loading-a-world) and an optional [lens](#the-lens).
+- `withRender()` takes `paused`.
+- `withPreset(preset)` replaces the policy with one of the presets below.
+- `withPerformance(options)` overrides fields on top of the current preset and marks the policy `manual`.
+- `build(capabilities)` clamps budgets to the limits, caps `shDegree` at the world's `maxShDegree`, and records every fallback in `performance.diagnostics`. Malformed numbers, invalid enums and unknown options throw.
+
+### Presets
+
+The table lists requested preset values; `build(capabilities)` resolves them against the backend.
+Both backends keep frustum culling on and Hi-Z off; Metal GPU ordering uses early termination, while Vulkan uses back-to-front blending without it.
+
+| Preset | Render scale | SH | LOD budget | Residency | LOD error px | Alpha | Sub-pixel | Hi-Z | Sort |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
+| `highEnd` | 1.25 | 3 | 4,000,000 | 4,000,000 | 0.75 | 1/255 | 1.0 | Yes | 32 |
+| `high` | 1.0 | 3 | 3,000,000 | 3,000,000 | 1.0 | 1/255 | 1.0 | Yes | 32 |
+| `balanced` | 0.85 | 2 | 2,000,000 | 2,000,000 | 1.25 | 1/255 | 1.0 | No | 16 |
+| `performance` | 0.65 | 1 | 1,000,000 | 1,000,000 | 2.0 | 2/255 | 1.0 | No | 16 |
+
+Lower `lodErrorPixels` sharpens the far field, which is where a captured room looks soft, and costs fill rate.
+Both backends fix the whole-splat alpha cutoff at 2/255 and report a fallback for a different requested value.
+
+### Splat budgets
+
+| Knob | Set through | Effect |
+| --- | --- | --- |
+| `lodCapacitySplats` | `withPerformance({lodBudgetSplats})` | LOD tree budget. 0 disables tree building. Load-time. |
+| `residencyCapacitySplats` | `withPerformance({residencyCapacitySplats})` | Resident splats of a tileset, not a memory guarantee. Load-time. |
+| `maxShDegree` | `withWorld()` | Load-time cap on stored spherical-harmonics degree. |
+| `shDegree` | `withPerformance({shDegree})` | Draw-time SH degree, 0 to 3, clamped to `maxShDegree`. |
+| `renderScale` | `withPerformance({renderScale})` | Render resolution scale, `[0.1, 2]`. |
+
+`lodCapacitySplats`, `residencyCapacitySplats` and `maxShDegree` apply at load time; changing them requires a new `requestId` and a reload.
+`shDegree` and `renderScale` update in place.
+`classifyPolicyChange(previous, next)` tells you which case you are in before you commit to it.
+
+### The `policy` prop and revisions
+
+`policy` carries the live renderer policy under a `revision`.
+Native revalidates the whole policy and never trusts JavaScript state, so give every change a new positive revision; 0 or less means no policy.
+Native reapplies the current revision to each new engine, and a world reload creates one, so expect `onPolicyEvent` again after a reload.
+
+`onCapabilities` fires once per engine, before that engine's first policy event, and reports the limits, the GPU features and exactly which policy fields the adapter applies.
+`onPolicyEvent` reports `PolicyPhase.applied`, `PolicyPhase.warning` (a field fell back, `message` says why) or `PolicyPhase.rejected` (the previous policy stayed in effect), and always carries the effective values.
+
+## API reference
+
+### `SplatKitView` props
+
+Extends the standard `ViewProps`.
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `world` | `WorldRequest` | - | Load transaction: `requestId`, absolute `filePath`, `kind` (absent is `WorldKind.file`), `maxShDegree`, `sourceFrame` (absent is the file's own frame), `lodCapacitySplats`, `residencyCapacitySplats`, and the optional [lens](#the-lens) `fieldOfViewDegrees`, `nearPlane`, `farPlane`. Omit to render nothing. |
+| `collider` | `ColliderRequest` | - | `{requestId, filePath}`. An empty `requestId` releases walk mode. |
+| `character` | `Character` | - | `{eyeHeight, bodyRadius, stepHeight}` in meters. |
+| `policy` | `NativeRenderPolicy` | - | The requested renderer policy, under a `revision`. |
+| `paused` | `boolean` | `false` | Freezes rendering. |
+| `renderScale` | `number` | `1` | Render resolution scale. |
+| `maxFramesPerSecond` | `number` | `0` | Most frames a second drawn, 1 to 240. `0` is the display's maximum; `60` halves the GPU work of a 120 Hz panel. |
+| `shDegree` | `number` (0-3) | `3` | Draw-time spherical-harmonics degree. |
+| `linearBlending` | `boolean` | `false` | Blends in linear light instead of the encoded space training used. |
+| `cullMarginDegrees` | `number` | `10` | Margin a streamed tileset keeps loaded around the view, so a turn finds tiles already there. |
+| `motionEnabled` | `boolean` | `false` | Drives the camera from the gyroscope. Ignored where the sensor is missing. |
+| `touchLookEnabled` | `boolean` | `true` | Whether a one-finger drag turns the camera. |
+| `lookSensitivity` | `number` | `0.004` | Radians per point dragged. |
+| `camera` | `toNativeCameraProp(request)` | absent | Revisioned configuration, applied after world preparation. |
+| `cameraPoseInterval` | `number` | `0` | Seconds between `onCameraPose` events. `0` never sends one. |
+
+### Events
+
+| Event | Payload |
+| --- | --- |
+| `onWorldEvent` | `{requestId, phase: WorldPhase, loadedSplats, errorCode, message}`. `errorCode` and `message` are set only on `failed`. |
+| `onColliderEvent` | `{requestId, phase: ColliderPhase, errorCode, message}`. |
+| `onStats` | `{requestId, loadedSplats, drawnSplats, frameMillis, gpuMillis, sortMillis}` with a `*TimingAvailable` flag beside each timing. Throttled to 2 Hz. |
+| `onCameraEvent` | Application result and effective camera state, tagged with the requested revision. |
+| `onCameraPose` | `{x, y, z, yaw, pitch}` in the world's frame, throttled to `cameraPoseInterval` and sent only when the pose changed. |
+| `onFocusResult` | `{requestId, hit}` for each `focus` command. A miss keeps the previous anchor. |
+| `onPolicyEvent` | `{revision, phase: PolicyPhase, errorCode, message}` plus every effective policy field. |
+| `onCapabilities` | The adapter's limits, GPU feature support and applied policy fields. Once per engine. |
+
+A `*TimingAvailable` flag of `false` means its paired value is not a measurement; pass both through `optionalTimingMillis()` to get `number | null`.
+
+### Commands
+
+Each takes the view ref first and returns nothing.
+
+| Command | Signature | Notes |
+| --- | --- | --- |
+| `setWalkVelocity` | `(ref, forward, right)` | Meters per second, held until called again. Forward is where the camera looks. Needs walk mode ready. |
+| `look` | `(ref, deltaYaw, deltaPitch)` | Radians. Pitch is clamped, and this is ignored while the gyroscope drives the view. |
+| `setCameraPose` | `(ref, x, y, z, yaw, pitch)` | Teleports. While walking, the camera settles onto the floor under the new point. |
+| `lookAt` | `(ref, x, y, z, targetX, targetY, targetZ, upX, upY, upZ)` | Points the camera from a world-space position at a target. |
+| `setAnchor` | `(ref, x, y, z)` | Sets a world-space orbit center from the current camera position. |
+| `orbit` | `(ref, deltaAzimuth, deltaElevation)` | Turns around the anchor in radians. |
+| `dolly` | `(ref, deltaRadius)` | Changes orbit radius in meters; positive moves away. |
+| `focus` | `(ref, requestId, x, y)` | Picks an anchor at view coordinates in `[0, 1]` against a loaded collider and reports `onFocusResult`. |
+| `animateOrbit` | `(ref, degrees, degreesPerSecond, easeInOut)` | Starts a finite turn around the anchor. |
+
+Loading a world sets a default anchor from its bounds; `setAnchor` or a successful `focus` replaces it.
+Orbit takes temporary control of the camera from walk mode; walking input resumes it.
+The view returns no command values, so use `onFocusResult` to distinguish a focus hit from a miss.
+
+### Constants
+
+Every enumerated value is a frozen object with a matching type, so there are no bare strings to misspell.
+
+| Export | Members |
+| --- | --- |
+| `QualityPreset` | `highEnd`, `high`, `balanced`, `performance` |
+| `qualityPresets` | every preset in order, for rendering a picker |
+| `WorldKind` | `file`, `tileset` |
+| `CoordinateFrame` | `rub`, `rdf`; any other of the 48 frames is spelled out |
+| `WorldPhase` | `uploaded`, `frameReady`, `failed` |
+| `ColliderPhase` | `ready`, `failed` |
+| `CameraMode` | `firstPerson`, `orbit` |
+| `CameraPhase` | `applied`, `rejected` |
+| `PolicyPhase` | `applied`, `warning`, `rejected` |
+| `PerformanceMode` | `auto`, `manual` |
+| `PolicyChangeKind` | `none`, `nativePropUpdate`, `worldReload`, `unavailable` |
+| `conservativeCapabilities` | the narrowest limits every shipped adapter accepts, for the first request |
+
+### Builder and helpers
+
+| Export | Purpose |
+| --- | --- |
+| `SplatKitBuilder` | `withWorld()`, `withRender()`, `withPerformance()`, `withPreset()`, `build(capabilities)`. |
+| `toNativeViewProps(configuration)` | The `world`, `paused`, `renderScale` and `shDegree` props. |
+| `toNativePolicyProp(configuration, revision)` | The `policy` prop for a positive revision. |
+| `nativeCapabilitiesFromEvent(event)` | An `onCapabilities` payload as a `DeviceCapabilities` snapshot for `build()`. |
+| `classifyPolicyChange(previous, next)` | Whether a change needs nothing, a prop update, a world reload, or is unavailable. |
+| `optionalTimingMillis(available, value)` | `value`, or `null` when unavailable. Zero is a valid measurement. |
+
+### Validators
+
+`validateWorldRequest(request, limits)`, `validateColliderRequest(request)`, `validateCharacter(character)` and `validateRenderOptions(options)` throw on structural violations.
+None of them touch the filesystem or the GPU.
+
+`PerformanceDiagnostic` explains every fallback `build()` made:
+
+| `code` | Meaning |
+| --- | --- |
+| `limit-clamped` | Clamped to a host or native limit. |
+| `native-option-fallback` | The adapter does not apply this field; it fell back to the native default. |
+| `native-support-unknown` | Capabilities have not arrived, so support is unknown. |
+| `fabric-option-unavailable` | The option has no Fabric prop. `targetFps` only, which is a request and never enables dynamic quality. |
+
+## Error codes
+
+Both adapters share these, so a host branches on `errorCode` without checking the platform.
+
+| Code | Reported on | Meaning |
+| --- | --- | --- |
+| `INVALID_REQUEST` | `onWorldEvent`, `onColliderEvent` | The request failed structural validation before native tried to load it. |
+| `WORLD_LOAD_FAILED` | `onWorldEvent` | The world file could not be decoded or loaded, or on iOS needs more memory than the app has left. |
+| `GPU_FAILED` | `onWorldEvent` | A terminal GPU failure stopped rendering. |
+| `GPU_UNAVAILABLE` | `onWorldEvent` | The GPU backend could not be initialized. |
+| `COLLIDER_LOAD_FAILED` | `onColliderEvent` | The collider GLB could not be loaded. |
+| `INVALID_CAMERA` | `onCameraEvent` | The camera request failed validation; the effective camera is unchanged. |
+| `INVALID_POLICY` | `onPolicyEvent` | The policy failed validation. |
+| `POLICY_PREPARATION_FAILED` | `onPolicyEvent` | The policy was valid but native could not prepare it; the previous one stays. |
+
+## Troubleshooting
+
+**The view is blank.**
+Check that `world` is set and that `onWorldEvent` fires at all; a view with no `world` renders nothing.
+Prefer a physical device: emulators often lack full Vulkan 1.1, which reports `GPU_UNAVAILABLE`.
+
+**The world fails to load.**
+`filePath` must be absolute, local and readable.
+Confirm the file is really at that path in the sandbox, and read `message` for the loader's reason.
+A `message` saying the world needs more memory than is free comes from iOS's check before decoding; prepare that world as a `.lodsplat` or a tileset, as [Preparing a world](#preparing-a-world) describes.
+
+**Nothing renders and the log mentions Fabric or Codegen.**
+`SplatKitView` is Fabric-only.
+Confirm the New Architecture is enabled and that a full rebuild picked up `SplatKitSpec`.
+
+**The scene is sharp up close and soft further out.**
+That is the LOD error threshold.
+Lower `lodErrorPixels` below the preset's value, and watch `onStats` for the fill-rate cost.
+
+**The HUD shows no frame rate.**
+A timing whose `*TimingAvailable` flag is `false` was not measured, which is not the same as zero.
+The Vulkan backend reports submitted frames rather than presented ones; its GPU timings use timestamp queries, while Metal uses completed command-buffer timestamps.
+
+## Example app
+
+[`apps/react-native`](https://github.com/Xget7/splatkit/tree/main/apps/react-native) is a React Native 0.87.1 app from the community template that installs this package, draws a thumb stick and a stats and quality HUD, and walks the prepared 12M-splat reference world.
+Its README lists every change a fresh template needs.
+
+## Related
+
+- [splatkit](https://github.com/Xget7/splatkit), the Vulkan and Metal SDKs and the shared C++ engine.
+- [splatkit-ios](https://github.com/Xget7/splatkit-ios), the Metal SDK.
+
+## Contributing
+
+This package is generated from a monorepo; see [CONTRIBUTING.md](https://github.com/Xget7/react-native-splatkit/blob/main/CONTRIBUTING.md).
+
+## License
+
+[MIT](https://github.com/Xget7/react-native-splatkit/blob/main/LICENSE)

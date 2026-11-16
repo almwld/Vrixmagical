@@ -1,0 +1,173 @@
+# Validation
+
+No publication until artifact integration, matched-image review and sustained physical-device runs pass.
+Mac Metal execution and Android cross-compilation do not establish phone performance.
+
+## Local checks
+
+```sh
+python3 scripts/sdk_harness.py check engine
+python3 scripts/sdk_harness.py check metal
+python3 scripts/sdk_harness.py check android
+python3 -m pip install -r scripts/requirements-validation.txt
+python3 -m unittest discover -s scripts/tests
+```
+
+Capture comparisons need Python 3.10+ and Pillow; their tests explicitly skip if Pillow is absent.
+Set `SPLAT_FIXTURES_DIR` for external core fixtures; report skips, never count them as validation.
+
+## Matched images
+
+```sh
+python3 scripts/compare_captures.py reference.json lod.json
+```
+
+Each manifest records `image` (relative path), `image_sha256`, original `world_sha256`, `environment`, `camera` and `settings`.
+`camera` contains column-major `view`/`projection` matrices (16 numbers each) and integer `viewport: [width, height]`.
+`settings` includes `render_scale`, `sh_degree`, `linear_blending`, `splat_budget` and every other active rendering override.
+Only `splat_budget` may differ by default; list other deliberate differences with `--vary`.
+Use HUD-free captures; `--roi X Y WIDTH HEIGHT` explicitly restricts measurement to a matching region.
+The tool rejects mismatched cameras, dimensions, hashes and colour tags; it never aligns or resizes images.
+It reports RGB MAE, PSNR, p99 error and worst 32-pixel region; `--max-mae` is an explicit numeric gate, not perceptual acceptance.
+Review silhouettes, thin geometry, transparency and temporal LOD transitions separately.
+
+The Mac integration test `MetalLodSelectionTest.OfflineFixtureRendersWithBoundedDrawCount` accepts `SPLAT_LOD_PATH`, optional `SPLAT_LOD_REFERENCE_SPZ`, `SPLAT_LOD_BUDGET` and `SPLAT_LOD_CAPTURE`.
+`SPLAT_LOD_POSE="x y z yaw pitch"` takes the pose as the SplatKit frame log prints it; without it the framing is the historical ISS view.
+`SPLAT_LOD_SIZE="width height"` and `SPLAT_LOD_ERROR_PIXELS` match the device's drawable and policy; `SPLAT_LOD_FRAMES` lets the adaptive threshold settle before the last frame is captured.
+`SPLAT_LOD_SORT_BITS` set to 16 or 32 picks the depth key width; the error-pixel policy alone draws with 16-bit keys.
+An offline hierarchy is not interchangeable evidence for the default load-time hierarchy.
+
+## Reference performance world
+
+Use the ~12M world for physical renderer acceptance, FPS/GPU-time, bandwidth and battery benchmarks.
+The local source is `build/example-worlds/scene.spz`: 11,988,085 source splats, SH1.
+Its prepared `build/example-worlds/scene.lodsplat` has 13,375,264 nodes and is installed as `scene.lodsplat` in the iOS dev app's Documents.
+Reuse these files by path; record source/prepared hashes, format, pose, viewport, SH and render policy for each comparison.
+Pass the world explicitly (`ios_perf.py --world scene.lodsplat`); confirm the matching installed filename on Android.
+Use the example living-room pose `--pose=-7.25,1.6,5.25,0,0` with `ios_perf.py`; the script writes it into the app's run file as `"pose": [-7.25, 1.6, 5.25, 0, 0]`.
+Never reuse kitchen's origin `(0,0,0)` for this world; verify a capture before the timed run and record the chosen budget (1.8M for the reference view).
+If it is unavailable, locate or request it instead of falling back to kitchen or another small world.
+Small fixtures remain useful for unit tests and development smoke checks, not representative renderer acceptance or performance claims.
+Build once and reuse the installed app for identical short runs; compare the same camera speed and configuration, with analysis done offline.
+
+## Sustained runs
+
+```sh
+python3 scripts/benchmark_report.py capture.log --environment physical --pid 123 --minimum-seconds 600
+```
+
+The shared benchmark accepts finite durations in `(0, 3600]`, preserves wall-time stalls, emits 30-second windows and final p99.
+It still makes one full turn per run: a 600-second turn is not the same trajectory speed as a 30-second turn.
+For constant-speed thermal comparisons, repeat identical 30-second turns for 10-15 minutes and keep every run plus the continuous thermal/memory trace; use `--minimum-seconds 30` per run.
+Pin world/hierarchy hashes, build, driver, pose, viewport, SH, depth mode and quality settings; warm up before capturing, record charging state and lifecycle interruptions.
+Sample PSS/RSS and thermal status independently; stop the device test on severe thermal status, repeated GPU failures or an unresponsive UI.
+GPU timings are latest-completed-query samples, may repeat and are not guaranteed to match the current host frame; zero/unavailable is not zero cost.
+Historical logs cannot supply missing p99 or memory/thermal evidence.
+Host callbacks may remain display-paced even when presentation vsync is disabled.
+
+## PR benchmark evidence
+
+Metal and Vulkan share the [GPU profiling protocol](GPU_PROFILING.md) and parameter preset.
+
+Screen changes that plausibly affect FPS, frame/GPU time or memory bandwidth with a short matched before/after benchmark on the affected physical device/backend.
+A measured change of roughly 10-20% or more, beyond run-to-run variation, requires visual evidence, whether improvement or regression.
+A meaningful frame-budget crossing or bandwidth change also qualifies; the percentage is a screening guide, not an exemption.
+For unrelated changes or effects within noise, state why benchmarking or a comparison is unnecessary; do not spend phone time producing an irrelevant benchmark.
+
+The PR's Evidence uses native Markdown comparative tables, with a one-sentence outcome; do not embed benchmark images.
+Use English, compact rows and explicit units, before/change means, absolute/percentage deltas and repeated-run ranges.
+Put secondary provenance and raw runs under a collapsible details section; do not repeat table values in prose.
+For event correlation, add a table of event ID, timestamp, observed workload, relevant timing and log/trace link.
+Distinguish recorded events, sampled observations and hypotheses; timestamp alignment and sampling delay do not establish causality.
+Use the same tables in engineer handoffs; optional plots remain linked offline artifacts.
+Do not accept an FPS optimization without demonstrated end-to-end benefit or with unresolved critical-stage regressions.
+With unmatched thermal state or adaptive workloads, mark attribution unvalidated and investigate using native traces/frames before accepting a performance claim.
+Label baseline/change commits, device/backend, workload, metric and units; show absolute values, percentage change and direction of improvement.
+Show individual repeated runs or their spread, and keep units explicit in separate rows.
+Include FPS and frame/GPU milliseconds when available; show bandwidth when the change concerns memory traffic and counters support it, and power when it is measured and relevant.
+Use the same device, world, camera speed, viewport, render policy and comparable image quality and starting thermal state; state deliberate differences.
+Run at least two short runs per side, alternating A/B when practical; reuse builds, installs and fixtures, then generate the comparison tables offline.
+Link the source JSON/logs/traces and record physical-device provenance, build identity, profiling overhead and sampling limits.
+Label estimated bandwidth or power explicitly; unavailable counters are unmeasured, never zero or inferred from FPS alone.
+If hardware or counters are unavailable, report the missing check and leave the performance conclusion unvalidated instead of inventing results.
+
+## iOS power comparisons
+
+Requires a physical iPhone on iOS 26+, wireless debugging and no cable or MagSafe charging.
+Apple reports overall system power as zero while charging; check charging, brightness and thermal lanes in Instruments.
+See [Power Profiler](https://developer.apple.com/documentation/xcode/measuring-your-app-s-power-use-with-power-profiler).
+The runner uses Blank plus the Power Profiler instrument; the stock template trapped in `NetworkConnectionStatsModeling` on Instruments 27.1 during physical iPhone recording finalization.
+
+Build and install once, using a short unrecorded turn to check the world and pose:
+
+```sh
+python3 scripts/ios_perf.py --udid <udid> --world scene.lodsplat --pose=-7.25,1.6,5.25,0,0 --budget 1800000 --seconds 30
+```
+
+Unplug, keep brightness fixed, let the phone cool, then capture one 30-second probe:
+
+```sh
+python3 scripts/ios_perf.py --udid <udid> --world scene.lodsplat --pose=-7.25,1.6,5.25,0,0 --budget 1800000 --seconds 30 --power --skip-build --skip-install --out output/ios-perf/power-probe
+```
+
+Each output directory must be new.
+The recorder finishes its time limit and saves before the runner terminates its attached app.
+After the benchmark the view is still and the engine draws only on changes.
+Saving over Wi-Fi can still take minutes; export runs offline after app termination.
+Inspect `power.trace` in Instruments first; `power-export/toc.xml`, table XML and `manifest.json` preserve exportable data and original units.
+`report.json` records capture/export status separately from power metrics, which remain unvalidated until their schema, units and time range are checked on a physical capture.
+The recorder attaches after the benchmark start log, so initial frames may be missing; compare a common covered interval, not whole-turn energy divided by the full frame count.
+Empty or partially failed exports fail the run and preserve the trace for an offline retry without using the phone:
+
+```sh
+python3 scripts/ios_power.py output/ios-perf/power-probe/power.trace --out output/ios-perf/power-probe/export-retry
+```
+
+Power tables with no rows are reported as unavailable, never as zero consumption.
+An exported table alone does not establish usable power samples.
+
+Once the probe is usable, repeat identical 30-second turns in A/B/B/A order, with a new output directory per turn and comparable starting temperature.
+Change one supported runtime option (`--budget` or `--subpixel`) to avoid rebuilding; these can change image quality and require matched-image review.
+Keep world, pose, quality, brightness and orbit duration fixed; the runner does not enforce a common FPS target, so record achieved FPS with consumption.
+Compare battery percentage points per hour and CPU/GPU impact in their exported units on the same phone; impact scores are not watts or joules.
+Short runs screen for large differences; increase repetitions if their variation overlaps, and keep sustained thermal claims separate.
+No physical power capture or export-schema validation is established by host tests.
+
+## Remaining parity gates
+
+| Contract | Metal / iOS | Vulkan / Android |
+|---|---|---|
+| Native LOD, visibility, radix, indirect draw | Implemented | Implemented |
+| Source and completed draw counts | Public stats | Public stats |
+| First successful GPU world-frame callback | Public delegate | Public `onWorldFrameReady` listener |
+| Scripted look-at with explicit up vector | Public API | Public API |
+| Orbit: anchor, dolly, focus, animated turn | Public API; scripted 360 on a physical iPhone | Public API |
+| Quality presets | Individual properties | `RenderQuality` presets |
+| GPU sort timing | Visibility + radix command interval | Isolated radix interval |
+| Per-instance render policy and capabilities | `SplatMetalView.renderPolicy`, `deviceCapabilities` | `SplatSurfaceView.applyRenderPolicy`, `deviceCapabilities` |
+| Policy fields applied natively | Sort depth, LOD error and LOD splat limit with GPU sort; sub-pixel on both order paths | Sort depth, LOD error and LOD splat limit with GPU visibility; sub-pixel on both order paths |
+| RN policy prop, capability and policy events | Physical iPhone 17 Pro | Physical Mi 9: revisions, fallback warnings, preset reloads, background; rejection host-tested only |
+
+Shared functionality does not imply identical internal algorithms or timing semantics.
+PNG capture is a Metal validation aid.
+Consistent stage diagnostics remain open; there is no equivalent-feature or universal 30/60 FPS claim.
+
+### Label validation and physical evidence
+
+No phone measurements are claimed for labels.
+Prior Metal measurements combine visibility and radix and do not isolate label cost; the Vulkan saturation-mask rejection remains applicable because labels do not change blending or presentation.
+Use the [profiling protocol](GPU_PROFILING.md) and [capture protocol](GPU_CAPTURE.md), with the 12M reference world and physical acceptance requirements above.
+Compare the unlabelled base build against the candidate build with no labels to check the default path, then compare labelled captured styles and an active highlight fade against the same unlabelled view.
+Record world and sidecar hashes, full build commits, device/driver/OS, viewport, SH1, 1.8M budget, pose `[-7.25, 1.6, 5.25, 0, 0]`, identical 30-second orbit speed and starting thermal state.
+Measure upload time, resident/peak CPU and GPU memory, FPS and frame/GPU milliseconds with repeated A-B-B-A runs; retain repeat ranges and absolute/percentage changes.
+Measure pick latency separately with picking enabled, including retained leaf memory, wide labels, unlabelled occlusion and misses.
+Capture matched images, reviewing label boundaries, transparency, LOD transitions and fades separately from the unlabelled image comparison.
+If timing identifies an effect, capture timelines and matched frames outside timing runs, resolving visibility, selection, radix, raster and present only where actual GPU samples support them, plus bandwidth counters where available.
+Power comparisons require unplugged matched-brightness iPhone runs with populated Power Profiler lanes; FPS is not a power measurement.
+Sustained claims require identical repeated 30-second turns for 10-15 minutes with continuous thermal and memory evidence.
+
+Copy `scripts/benchmarks/reference-12m.json` into ignored `build/`, fill device IDs and prepared build paths/commits, and run `nice -n 19 python3 scripts/gpu_benchmark.py plan --config build/labels.json --target metal`, followed by `run` with a new `--out` and `compare --manifest <out>/experiment.json`.
+Use `--target vulkan` for the corresponding Android comparison, `--phase timeline` for diagnostic traces and `--phase power` for supported iPhone power capture.
+The generated `run.json` preserves the world, pose, policy, warmup and orbit schedule.
+The current dev-app run schema does not carry label sidecars or highlight requests, so labelled phone measurements additionally require host wiring to the C++ labelled load and highlight APIs before running this protocol; do not claim the plain run file exercises labels.
+No simulator, Mac GPU or cross-compilation result establishes physical acceptance.

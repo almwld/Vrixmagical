@@ -1,0 +1,106 @@
+# Changelog
+
+Notable changes to the SplatKit React Native package.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions before 1.0 may break APIs.
+
+## Unreleased
+
+- Breaking: `WorldRequest.sourceFrame`, a `CoordinateFrame` of three letters such as `CoordinateFrame.rdf`, names the frame a world, its tiles and its collider were written in; absent, an SPZ loads in the frame its tag declares, else `rub`, so an untagged World Labs Marble export needs `sourceFrame: CoordinateFrame.rdf`.
+  `parseCoordinateFrame` turns a string into one.
+- A terminal GPU failure reaches `onWorldEvent` as a failed world with code `GPU_FAILED` on both platforms.
+
+## [0.1.0-beta.2] - 2026-10-23
+
+The Android dependency and checksum-verified iOS artifact pin native SDK `0.1.0-beta.2`.
+
+- Backport a 128-level nesting guard for GHSA-vfj7-8cjw-p6xm in development-tool `braces@3.0.3`; install hooks and CI verify it without changing the version reported by `npm audit`.
+- The npm publisher rejects registry failures, serializes runs from current `main`, preserves forward-only `latest` promotion, and repairs missing release metadata using npm's published source commit.
+- Refresh the development-tool `shell-quote` dependency to 1.12.0, fixing GHSA-pqg4-j6r4-53mv.
+
+## [0.1.0-beta.1] - 2026-10-01
+
+- Add revisioned `camera` requests, `CameraMode`, `toNativeCameraProp`, and `onCameraEvent` with native validation and effective state.
+- Support continuous signed orbit rates and retain accepted camera requests across world replacement.
+- Move the example flythrough to optional host-side Reanimated worklets.
+
+The Android dependency and checksum-verified iOS artifact both pin native SDK `0.1.0-beta.1`.
+
+## [0.1.0-alpha.3] - 2026-09-21
+
+The TypeScript surface is unchanged from alpha.2.
+This release repins the native SDKs, corrects the licence and rewrites the README.
+
+### Changed
+
+- The Android adapter depends on `io.github.xget7:splatkit-android:0.1.0-alpha09`, and `npm prepack` fetches the splatkit-ios `0.1.0-alpha.5` XCFramework.
+  Both drop the native views' `motionToggleEnabled` and the double tap that toggled the gyroscope; the Fabric `motionEnabled` prop is unaffected.
+- The README is rewritten around the shipped API: requirements, installation, a quick start, loading a world, navigation, quality and performance, an API reference and the error codes.
+
+### Fixed
+
+- The copyright holder in `LICENSE` and in the vendored XCFramework's `Notices/SplatKit.txt` reads Juan Ignacio Andrade.
+- The vendored notices name splat-transform (PlayCanvas), whose collision voxel passes `splat-core`'s collider builder ports, and carry its MIT licence.
+
+## [0.1.0-alpha.2] - 2026-09-18
+
+### Added
+
+- Walk mode: a `collider` prop that loads a GLB and turns the camera into a character that stands on floors, a `character` prop shaping the walker, and `onColliderEvent` reporting the `ColliderPhase` outcome.
+- `SplatKitCommands`, imperative navigation for the host's own controls: `setWalkVelocity`, `look` and `setCameraPose` drive a mounted view at touch rate without a React commit per frame.
+- `onCameraPose` and the `cameraPoseInterval` prop, which report where the camera ended up at most that often and only while it moves.
+- The `linearBlending`, `cullMarginDegrees`, `motionEnabled`, `touchLookEnabled` and `lookSensitivity` view props.
+- `conservativeCapabilities`, the narrowest limits any shipped adapter reports, to build the first world request against before an engine exists to send `onCapabilities`.
+- The `ColliderRequest`, `Character`, `ColliderEvent` and `CameraPose` contracts, with `validateColliderRequest` and `validateCharacter`.
+- `policyRasterMask` in `onCapabilities` and `rasterStrategies` in the native policy support, so `computeTile` on iOS reports a fallback instead of an applied raster.
+
+### Changed
+
+- `RasterStrategy`, `PerformanceMode`, `QualityPreset`, `PolicyChangeKind`, `PolicyPhase` and the new `WorldPhase` and `ColliderPhase` are exported as constant objects as well as types, so a host compares against a value instead of spelling a string literal.
+  `qualityPresets` lists the presets in decreasing detail.
+- Every preset rasterizes in hardware; `high` and `balanced` requested hybrid tiles and `highEnd` compute tiles.
+  `withPerformance({raster: 'hybrid'})` opts into iOS screen tiles, which only help where many large translucent splats overlap.
+- The Android adapter depends on `io.github.xget7:splatkit-android:0.1.0-alpha08`, and `npm prepack` fetches the splatkit-ios `0.1.0-alpha.4` XCFramework.
+
+### Fixed
+
+- The Android adapter reports the frame, GPU and sort times it measures.
+  It had sent zero for each with the availability flag false, so `onStats` never carried a timing on Android.
+
+## [0.1.0-alpha.1] - 2026-09-17
+
+First npm publication.
+It replaces the previous `react-native-splatkit` binding, which bound Maven `0.1.0-alpha04` on Android and had no iOS engine.
+
+### Added
+
+- `@splatkit/react-native`: a Fabric `SplatKitView` generated by Codegen, with Kotlin and Objective-C++ adapters over the SplatKit Android and iOS SDKs.
+- `SplatKitBuilder` with the `highEnd`, `high`, `balanced` and `performance` presets, manual overrides, and requested and effective values with diagnostics.
+- A `world` prop carrying request identity, file path, maximum SH degree and the LOD and residency capacities, plus `paused`, `renderScale` and `shDegree`.
+- A versioned `policy` prop, the `onCapabilities` event and `onPolicyEvent` reporting `applied`, `warning` or `rejected` with the effective policy.
+- `onWorldEvent` with `uploaded`, `frameReady` and `failed` phases, and `onStats` snapshots throttled to 2 Hz with timing availability flags.
+- Shared failure codes `INVALID_REQUEST`, `WORLD_LOAD_FAILED`, `GPU_UNAVAILABLE`, `INVALID_POLICY` and `POLICY_PREPARATION_FAILED`.
+- Standalone build wiring for installing outside the SplatKit repository: the Android module applies the `com.facebook.react` Gradle plugin for autolinking and Codegen and depends on `io.github.xget7:splatkit-android` from Maven Central by default, and `SplatKitReactNative.podspec` vendors a `SplatKitCore.xcframework` fetched and checksum-verified at `npm prepack`.
+- `peerDependencies` on `react` and `react-native` 0.87, and a `publish.yml` workflow that publishes a `v*` tag to npm.
+- One-finger look and two-finger walk on iOS, matching the Android SDK view's touch input.
+
+### Fixed
+
+- iOS dropped the first engine's `onCapabilities` and `onPolicyEvent`, because Fabric mounts props before the event emitter; world and policy work now runs in `finalizeUpdates`.
+
+### Removed
+
+- The `react-native-splatkit` package name, `SplatView` and its `source`, `collider`, `quality`, `cameraPose`, `motionEnabled`, sensitivity and `statsInterval` props.
+- The `onEngineReady`, `onWorldReady`, `onWorldFailed`, `onColliderReady` and `onColliderFailed` events, and the imperative `setWalkVelocity`, `setCameraPose` and `startBenchmark` handle.
+  Colliders and camera poses are not wired into the Fabric view in this release; alpha.2 adds them.
+
+### Known limitations
+
+- A fresh React Native 0.87.1 app builds the package on both platforms and ran it on an iPhone 17 Pro; on Android only the SplatKit React Native dev app has run, on a Mi 9.
+- iOS has no gyroscope toggle, and colliders, camera poses and joysticks are not exposed.
+
+[0.1.0-beta.1]: https://github.com/Xget7/react-native-splatkit/releases/tag/v0.1.0-beta.1
+[0.1.0-alpha.3]: https://github.com/Xget7/react-native-splatkit/releases/tag/v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/Xget7/react-native-splatkit/releases/tag/v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/Xget7/react-native-splatkit/releases/tag/v0.1.0-alpha.1
+
+[0.1.0-beta.2]: https://github.com/Xget7/react-native-splatkit/releases/tag/v0.1.0-beta.2

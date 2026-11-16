@@ -1,0 +1,3039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>PlayCanvas VR Demo</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#1a8fe3" />
+    <link rel="icon" href="icon-192.png" />
+    <style>
+        :root {
+            --bg: #05070d;
+            --accent: #4cc2ff;
+            --text: #e8eef8;
+            --muted: #8496ad;
+        }
+        html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg); }
+        canvas { display: block; width: 100%; height: 100%; }
+
+        #hud {
+            position: fixed; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+            color: var(--text); pointer-events: none;
+            background: radial-gradient(ellipse at 50% 45%, rgba(10,20,40,0.55), rgba(5,7,13,0.9) 70%);
+        }
+        #card {
+            pointer-events: auto;
+            width: min(90vw, 540px);
+            padding: 40px 36px 32px;
+            border-radius: 20px;
+            background: rgba(14, 20, 34, 0.72);
+            border: 1px solid rgba(76, 194, 255, 0.22);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+            backdrop-filter: blur(14px);
+            text-align: center;
+        }
+        #eyebrow {
+            font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+            color: var(--accent); font-weight: 600; margin-bottom: 14px;
+        }
+        #hud h1 {
+            margin: 0 0 14px; font-size: 30px; line-height: 1.15;
+            font-weight: 650; letter-spacing: -0.02em; color: #fff;
+        }
+        #blurb { margin: 0 0 26px; font-size: 15px; line-height: 1.55; color: var(--muted); }
+        #blurb b { color: var(--text); font-weight: 600; }
+
+        #enter {
+            pointer-events: auto; display: inline-flex; align-items: center; gap: 10px;
+            padding: 16px 34px; font-size: 18px; font-weight: 650;
+            font-family: inherit; color: #04121c;
+            background: linear-gradient(180deg, #7ed6ff, var(--accent));
+            border: 0; border-radius: 999px; cursor: pointer;
+            box-shadow: 0 8px 26px rgba(76,194,255,0.35);
+            transition: transform .12s ease, box-shadow .12s ease;
+        }
+        #enter:hover { transform: translateY(-1px); box-shadow: 0 12px 32px rgba(76,194,255,0.45); }
+        #enter:active { transform: translateY(1px); }
+        #enter[disabled] {
+            background: #223047; color: #6b7c92; cursor: default;
+            box-shadow: none; transform: none;
+        }
+
+        #status { margin-top: 18px; font-size: 13px; color: var(--muted); min-height: 18px; }
+        #status.warn { color: #ffb86b; }
+        #note { margin-top: 22px; font-size: 12px; color: #5f7086; line-height: 1.5; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <script src="playcanvas.min.js"></script>
+    <div id="hud">
+        <div id="card">
+            <div id="eyebrow">WebXR &middot; Quest 3</div>
+            <h1>Per-pixel depth,<br />straight off the sensors</h1>
+            <p id="blurb">
+                Real depth from the headset&rsquo;s own sensors &mdash; sampled
+                <b>per eye</b>, so it lands on your hands in stereo.
+                No AI, no native code.
+            </p>
+            <button id="enter">Enter Mixed Reality</button>
+            <div id="status">checking your headset&hellip;</div>
+            <div id="note">Quest 3 or 3S in Meta Quest Browser. You&rsquo;ll be asked to allow spatial data.</div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        const canvas = document.createElement('canvas');
+        document.body.insertBefore(canvas, document.body.firstChild);
+
+        const app = new pc.Application(canvas, {
+            mouse: new pc.Mouse(canvas),
+            touch: new pc.TouchDevice(canvas),
+            keyboard: new pc.Keyboard(window),
+            /// alpha must be true or the framebuffer is opaque and AR passthrough
+            /// has nothing to composite through — the scene just renders black.
+            graphicsDeviceOptions: { antialias: true, alpha: true }
+        });
+        app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
+        app.setCanvasResolution(pc.RESOLUTION_AUTO);
+        window.addEventListener('resize', () => app.resizeCanvas());
+
+        /// ?scale=<n> drives the WebXR framebuffer scale factor. 1.0 is the UA
+        /// default, which is NOT native resolution — the native factor is only
+        /// knowable once a session exists, so the panel reports it and we relaunch
+        /// with that number to actually claim it.
+        /// Bumped by hand on every deploy — the only reliable way to tell in the
+        /// headset whether you are looking at a fresh build or a cached one.
+        const BUILD = 81;
+
+        const urlParams = new URLSearchParams(location.search);
+        const scaleParam = parseFloat(urlParams.get('scale'));
+        const requestedScale = (isFinite(scaleParam) && scaleParam > 0) ? scaleParam : 1.5;
+
+        /// ?mode=ar starts an immersive-ar session with depth sensing. Depth and
+        /// anchors are MR features, so they need passthrough (immersive-ar) plus
+        /// the USE_SCENE android permission that the packaged APK declares.
+        /// VR is the default: a plain launch must always come up. AR/depth is
+        /// opt-in via ?mode=ar so an experiment can never break the base demo.
+        const arMode = urlParams.get('mode') !== 'vr';
+        /// ?demo=occlusion turns this into the depth-occlusion experiment:
+        /// no fire overlay, splat loaded, real-world depth writing enabled
+        const demoOcclusion = urlParams.get('demo') === 'occlusion';
+        /// panel, controller rays and cubes are diagnostics - off unless ?debug=1
+        const showDebug = urlParams.get('debug') === '1';
+        /// PIXELFORMAT_DEPTH (unsigned-short) samples as zero through a normal
+        /// sampler2D, so allow the format/usage to be swept from the URL.
+        const DFMT = {
+            f32: pc.XRDEPTHSENSINGFORMAT_F32,
+            la8: pc.XRDEPTHSENSINGFORMAT_L8A8,
+            u16: pc.XRDEPTHSENSINGFORMAT_R16U
+        };
+        const depthFormatPref = DFMT[urlParams.get('dfmt')] || pc.XRDEPTHSENSINGFORMAT_F32;
+        /// CPU is the default: getDepth() is disabled under gpu-optimized, and the
+        /// GPU texture is unsampleable on Quest Browser anyway.
+        const depthUsagePref = urlParams.get('dusage') === 'gpu'
+            ? pc.XRDEPTHSENSINGUSAGE_GPU : pc.XRDEPTHSENSINGUSAGE_CPU;
+        const dscaleParam = parseFloat(urlParams.get('dscale'));
+        let depthScale = isFinite(dscaleParam) ? dscaleParam : (8 / 65535);
+        /// Quest hands back NON-LINEAR projective depth: values bunch near the top
+        /// of the range. Convert with the z-buffer relation instead of a scale.
+        let depthNear = 0.1;
+        let depthFar = 8.0;
+        let depthProjective = true;
+        function rawToMetres(q) {
+            if (!depthProjective) return q * depthScale;
+            const z = q / 65535;
+            const inv = (1 / depthNear) - z * ((1 / depthNear) - (1 / depthFar));
+            return inv > 0.0001 ? (1 / inv) : depthFar;
+        }
+        /// XrManager.start() hard-rejects a type whose async isSessionSupported()
+        /// has not resolved yet, so availability must be tracked for the type we
+        /// actually intend to start — not just immersive-vr.
+        let sessionType = arMode ? pc.XRTYPE_AR : pc.XRTYPE_VR;
+
+        /// ?dusage=cpuonly lists cpu-optimized as the ONLY acceptable usage, so the
+        /// UA must either honour it or reject - which tells us definitively whether
+        /// Quest supports CPU depth at all. Default keeps PlayCanvas' own list.
+        if (navigator.xr && urlParams.get('dusage') === 'cpuonly') {
+            const origRequest = navigator.xr.requestSession.bind(navigator.xr);
+            navigator.xr.requestSession = function (mode, opts) {
+                if (opts && opts.depthSensing) {
+                    opts.depthSensing = {
+                        usagePreference: ['cpu-optimized'],
+                        dataFormatPreference: ['luminance-alpha', 'float32', 'unsigned-short']
+                    };
+                    console.log('[pcvr] forcing cpu-only depth preference');
+                }
+                return origRequest(mode, opts).then(function (session) {
+                    console.log('[pcvr] session depthUsage=' + session.depthUsage +
+                        ' depthDataFormat=' + session.depthDataFormat);
+                    return session;
+                }, function (err) {
+                    console.log('[pcvr] cpu-only depth REJECTED: ' + err.message);
+                    throw err;
+                });
+            };
+        }
+
+        app.scene.ambientLight = new pc.Color(0.12, 0.14, 0.2);
+
+        /// camera lives under a rig so we can move the player without fighting
+        /// the headset pose the XR system writes onto the camera itself.
+        const rig = new pc.Entity('rig');
+        app.root.addChild(rig);
+
+        const camera = new pc.Entity('camera');
+        camera.addComponent('camera', {
+            clearColor: new pc.Color(0.02, 0.03, 0.05),
+            farClip: 200
+        });
+        camera.setLocalPosition(0, 1.6, 0);
+        rig.addChild(camera);
+
+        const light = new pc.Entity('key-light');
+        light.addComponent('light', {
+            type: 'directional', color: new pc.Color(1, 0.96, 0.9),
+            intensity: 1.6, castShadows: true, shadowBias: 0.2,
+            normalOffsetBias: 0.05, shadowDistance: 40
+        });
+        light.setEulerAngles(50, 30, 0);
+        app.root.addChild(light);
+
+        const fill = new pc.Entity('fill-light');
+        fill.addComponent('light', { type: 'omni', color: new pc.Color(0.3, 0.5, 1), intensity: 2, range: 20 });
+        fill.setPosition(0, 3, -4);
+        app.root.addChild(fill);
+
+        function material(r, g, b, emissive) {
+            const m = new pc.StandardMaterial();
+            m.diffuse = new pc.Color(r, g, b);
+            m.gloss = 0.7;
+            m.metalness = 0.1;
+            m.useMetalness = true;
+            if (emissive) {
+                m.emissive = new pc.Color(r, g, b);
+                m.emissiveIntensity = 0.6;
+            }
+            m.update();
+            return m;
+        }
+
+        const floor = new pc.Entity('floor');
+        floor.addComponent('render', { type: 'plane', material: material(0.09, 0.1, 0.13) });
+        floor.setLocalScale(40, 1, 40);
+        app.root.addChild(floor);
+
+        /// a ring of cubes at eye height — easy to tell at a glance whether
+        /// stereo rendering and head tracking are actually live.
+        const cubes = [];
+        const COUNT = 12;
+        for (let i = 0; i < COUNT; i++) {
+            const a = (i / COUNT) * Math.PI * 2;
+            const hue = (i / COUNT) * Math.PI * 2;
+            const cube = new pc.Entity('cube' + i);
+            cube.addComponent('render', {
+                type: 'box',
+                material: material(
+                    0.5 + 0.5 * Math.sin(hue),
+                    0.5 + 0.5 * Math.sin(hue + 2.09),
+                    0.5 + 0.5 * Math.sin(hue + 4.19),
+                    true
+                )
+            });
+            cube.setPosition(Math.sin(a) * 3.5, 1.4, Math.cos(a) * 3.5);
+            cube.setLocalScale(0.5, 0.5, 0.5);
+            cube.enabled = showDebug;
+            app.root.addChild(cube);
+            cubes.push({ entity: cube, phase: a });
+        }
+
+        let t = 0;
+        app.on('update', function (dt) {
+            t += dt;
+            for (let i = 0; i < cubes.length; i++) {
+                const c = cubes[i];
+                c.entity.rotate(20 * dt, 40 * dt, 0);
+                const p = c.entity.getPosition();
+                c.entity.setPosition(p.x, 1.4 + Math.sin(t * 1.5 + c.phase) * 0.35, p.z);
+            }
+        });
+
+        /// ---- controller / hand input: draw a ray from each input source ----
+        const rays = new Map();
+        function addInputSource(inputSource) {
+            if (!showDebug) return;
+            const e = new pc.Entity('ray');
+            e.addComponent('render', { type: 'box', material: material(0.9, 0.9, 1, true) });
+            e.setLocalScale(0.012, 0.012, 1.2);
+            app.root.addChild(e);
+            rays.set(inputSource, e);
+        }
+        function removeInputSource(inputSource) {
+            const e = rays.get(inputSource);
+            if (e) { e.destroy(); rays.delete(inputSource); }
+        }
+        if (app.xr && app.xr.input) {
+            app.xr.input.on('add', addInputSource);
+            app.xr.input.on('remove', removeInputSource);
+        }
+        app.on('update', function () {
+            rays.forEach(function (e, inputSource) {
+                const o = inputSource.getOrigin();
+                const d = inputSource.getDirection();
+                e.setPosition(o.x + d.x * 0.6, o.y + d.y * 0.6, o.z + d.z * 0.6);
+                e.lookAt(o.x + d.x, o.y + d.y, o.z + d.z);
+            });
+        });
+
+        /// ---- diagnostics panel ----
+        /// Quest Browser gives us no devtools socket, so the readout has to live
+        /// in the scene itself: a canvas texture on a quad pinned to the camera.
+        const PANEL_W = 1024;
+        const PANEL_H = 512;
+        const panelCanvas = document.createElement('canvas');
+        panelCanvas.width = PANEL_W;
+        panelCanvas.height = PANEL_H;
+        const pctx = panelCanvas.getContext('2d');
+
+        const panelTex = new pc.Texture(app.graphicsDevice, {
+            width: PANEL_W,
+            height: PANEL_H,
+            format: pc.PIXELFORMAT_RGBA8,
+            mipmaps: false,
+            addressU: pc.ADDRESS_CLAMP_TO_EDGE,
+            addressV: pc.ADDRESS_CLAMP_TO_EDGE
+        });
+        panelTex.setSource(panelCanvas);
+
+        const panelMat = new pc.StandardMaterial();
+        panelMat.diffuse = new pc.Color(0, 0, 0);
+        panelMat.emissiveMap = panelTex;
+        panelMat.emissive = new pc.Color(1, 1, 1);
+        panelMat.useLighting = false;
+        panelMat.update();
+
+        const panel = new pc.Entity('diagnostics');
+        panel.addComponent('render', { type: 'plane', material: panelMat, castShadows: false });
+        panel.setLocalEulerAngles(90, 0, 0);
+        panel.setLocalPosition(0, -0.30, -0.9);
+        panel.setLocalScale(0.72, 1, 0.36);
+        panel.enabled = showDebug;
+        camera.addChild(panel);
+
+        function drawPanel(lines) {
+            pctx.fillStyle = 'rgba(6, 10, 18, 0.94)';
+            pctx.fillRect(0, 0, PANEL_W, PANEL_H);
+            pctx.strokeStyle = '#1a8fe3';
+            pctx.lineWidth = 6;
+            pctx.strokeRect(3, 3, PANEL_W - 6, PANEL_H - 6);
+            pctx.textBaseline = 'top';
+            for (let i = 0; i < lines.length; i++) {
+                /// build stamp gets accent colour so a stale cache is obvious
+                if (i === 0) {
+                    pctx.fillStyle = '#4cc2ff';
+                    pctx.font = '700 44px "Consolas", "Courier New", monospace';
+                } else {
+                    pctx.fillStyle = '#e8eef8';
+                    pctx.font = '600 34px "Consolas", "Courier New", monospace';
+                }
+                pctx.fillText(lines[i], 34, 24 + i * 44);
+            }
+            panelTex.upload();
+        }
+
+        function num(v, digits) {
+            return (typeof v === 'number' && isFinite(v)) ? v.toFixed(digits) : '?';
+        }
+
+        function refreshPanel() {
+            const lines = [
+                'BUILD ' + BUILD + '   mode=' + (sessionType === pc.XRTYPE_AR ? 'ar' : 'vr'),
+                '',
+                'scale req : ' + num(requestedScale, 3)
+            ];
+            const s = app.xr.session;
+
+            if (s) {
+                let nativeScale = NaN;
+                try {
+                    nativeScale = window.XRWebGLLayer.getNativeFramebufferScaleFactor(s);
+                } catch (e) { /* not exposed on this UA */ }
+
+                const bl = s.renderState && s.renderState.baseLayer;
+                let viewCount = '?';
+                try { viewCount = app.xr.views.list.length; } catch (e) { /* older api */ }
+
+                lines.push('scale nat : ' + num(nativeScale, 3));
+                lines.push('scale pc  : ' + num(app.xr.framebufferScaleFactor, 3));
+                lines.push('framebuf  : ' + (bl ? bl.framebufferWidth + ' x ' + bl.framebufferHeight : 'n/a'));
+                lines.push('views     : ' + viewCount);
+                lines.push('refresh   : ' + (s.frameRate ? num(s.frameRate, 0) + ' Hz' : 'n/a'));
+                lines.push('rates     : ' + (s.supportedFrameRates ?
+                    Array.from(s.supportedFrameRates).join(' ') : 'n/a'));
+
+                if (arMode) {
+                    const v = app.xr.views;
+                    lines.push('depth sup : ' + v.supportedDepth + '  avail: ' + v.availableDepth);
+                    lines.push('depth fmt : ' + v.depthFormat + ' / ' + v.depthUsage);
+                    lines.push('raw ctr   : ' + lastDepthRaw);
+                    lines.push('raw range : ' + lastRawLo + ' .. ' + lastRawHi);
+                    lines.push('overlay   : d=' + depthDist + ' s=' + depthSize +
+                        ' flip=' + (depthFlip ? 1 : 0) + ' mir=' + (depthMirror ? 1 : 0));
+                    lines.push('dist      : ' + (lastDepthCentre
+                        ? lastDepthCentre.toFixed(3) + ' m' : 'no reading'));
+                    bindDepthPreview();
+                }
+            } else {
+                lines.push('(no xr session yet)');
+            }
+
+            lines.push('fps       : ' + num(fps, 1));
+            drawPanel(lines);
+        }
+
+        /// ---- raw WebXR depth, bypassing PlayCanvas ----
+        /// Quest Browser hands GPU depth over as a TEXTURE_2D_ARRAY (one layer per
+        /// eye, selected by imageIndex) in an unsigned-short *integer* format.
+        /// PlayCanvas wraps it as a plain 2D texture, so a sampler2D read returns
+        /// zero. Sample it ourselves with usampler2DArray/texelFetch, blit to an
+        /// RGBA target, read that back, and publish it through the canvas-texture
+        /// path that already works for the readout panel.
+        const DEPTH_W = 320;
+        const DEPTH_H = 320;
+
+        let depthPreview = null;
+        let depthCanvas = null;
+        let depthCtx = null;
+        let depthImage = null;
+        let depthTexture = null;
+        let depthPixels = null;
+
+        let glDepth = null;
+        let xrBinding = null;
+        let lastXrFrame = null;
+        let depthFrameLoopStarted = false;
+        let depthLoopSession = null;
+        let depthGateErr = null;
+        let depthRefreshCount = 0;
+        let depthLogged = false;
+        let depthErrLogged = false;
+        let depthFmtLogged = false;
+        /// ?dsampler=f forces the normalized-float sampler instead of the integer one
+        const useUintSampler = new URLSearchParams(location.search).get('dsampler') !== 'f';
+        let lastDepthBlit = 0;
+        let lastGridSample = null;
+        let lastDepthCentre = 0;
+        let lastDepthRaw = 0;
+        let lastHist = 0;
+        let lastRawLo = 0;
+        let lastRawHi = 0;
+        const depthOverlay = new URLSearchParams(location.search).get('doverlay') !== '0';
+        const dopParam = parseFloat(new URLSearchParams(location.search).get('dop'));
+        let depthOpacity = isFinite(dopParam) ? dopParam : 0.75;
+        const ddistParam = parseFloat(new URLSearchParams(location.search).get('ddist'));
+        let depthDist = isFinite(ddistParam) ? ddistParam : 2.5;
+        const dsizeParam = parseFloat(new URLSearchParams(location.search).get('dsize'));
+        let depthSize = isFinite(dsizeParam) ? dsizeParam : 0.6;
+        let depthFlip = new URLSearchParams(location.search).get('dflip') !== '0';
+        let depthMirror = new URLSearchParams(location.search).get('dmirror') === '1';
+        const allowGpuBlit = true;
+
+        function startDepthFrameLoop() {
+            const session = app.xr.session;
+            if (!session) return;
+            /// keyed on the session, NOT a one-shot flag - re-entering XR makes
+            /// a new session and it needs its own loop
+            if (depthLoopSession === session) return;
+            depthLoopSession = session;
+            depthFrameLoopStarted = true;
+            const tick = function (time, frame) {
+                lastXrFrame = frame;
+                lastFrameTime = time;
+                /// refresh the depth handle every frame so the composite samples
+                /// the current frame, not whatever the last readback captured
+                if (eyeOn || occOn || dbgOn || primeOn) {
+                    try { refreshDepthInfo(frame); } catch (e) { depthGateErr = e.message; }
+                }
+                /// the depth texture is opaque: it is only a legal GL object inside
+                /// the frame callback that produced it. Doing the pass later (from
+                /// app.on('update')) fails the draw with GL_INVALID_OPERATION.
+                if ((cloudOn || readbackOn) && time - lastDepthBlit > 200) {
+                    lastDepthBlit = time;
+                    try {
+                        blitDepth(frame, time);
+                    } catch (e) {
+                        if (!depthErrLogged) {
+                            depthErrLogged = true;
+                            console.log('[pcvr] depth blit threw: ' + e.message);
+                        }
+                    }
+                }
+                if (app.xr.session === session) {
+                    session.requestAnimationFrame(tick);
+                } else if (depthLoopSession === session) {
+                    /// this session is over; let the next one start its own loop
+                    depthLoopSession = null;
+                }
+            };
+            session.requestAnimationFrame(tick);
+        }
+
+        function compileShader(gl, type, src) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                console.log('[pcvr] shader compile failed: ' + gl.getShaderInfoLog(s));
+                return null;
+            }
+            return s;
+        }
+
+        function initGlDepth() {
+            const gl = app.graphicsDevice.gl;
+            if (!gl || glDepth) return glDepth;
+
+            /// Mirrors Meta's proj-multiview-occlusion sample: a FLOAT
+            /// sampler2DArray read with texture() and normalised UVs. The integer
+            /// sampler + texelFetch combination is what throws INVALID_OPERATION.
+            const vs = compileShader(gl, gl.VERTEX_SHADER,
+                '#version 300 es\n' +
+                'in vec2 aPos;\n' +
+                'out vec2 vUv;\n' +
+                'void main() {\n' +
+                '    vUv = aPos * 0.5 + 0.5;\n' +
+                '    gl_Position = vec4(aPos, 0.0, 1.0);\n' +
+                '}\n');
+            const useFloat = new URLSearchParams(location.search).get('dsampler') !== 'u';
+            const fs = compileShader(gl, gl.FRAGMENT_SHADER,
+                '#version 300 es\n' +
+                'precision highp float;\n' +
+                (useFloat
+                    ? 'precision highp sampler2DArray;\nuniform sampler2DArray uDepth;\n'
+                    : 'precision highp usampler2DArray;\nuniform usampler2DArray uDepth;\n') +
+                'uniform float uLayer;\n' +
+                'in vec2 vUv;\n' +
+                'out vec4 fragColor;\n' +
+                'void main() {\n' +
+                '    ivec3 c = ivec3(int(gl_FragCoord.x), int(gl_FragCoord.y), int(uLayer));\n' +
+                /// pack the RAW value - the previous shader scaled by 1000
+                /// and clamped at 16m, which saturated nearly every pixel to 1.0
+                /// and made real depth look like a binary mask
+                (useFloat
+                    ? '    float q = floor(clamp(texture(uDepth, vec3(vUv, uLayer)).r, 0.0, 1.0) * 65535.0 + 0.5);\n'
+                    : '    float q = float(texelFetch(uDepth, c, 0).r);\n') +
+                '    float hi = floor(q / 256.0);\n' +
+                '    float lo = q - hi * 256.0;\n' +
+                '    fragColor = vec4(hi / 255.0, lo / 255.0, 0.0, 1.0);\n' +
+                '}\n');
+            if (!vs || !fs) return null;
+
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.bindAttribLocation(prog, 0, 'aPos');
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                console.log('[pcvr] depth program link failed: ' + gl.getProgramInfoLog(prog));
+                return null;
+            }
+
+            const vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+            gl.bufferData(gl.ARRAY_BUFFER,
+                new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, DEPTH_W, DEPTH_H, 0,
+                gl.RGBA, gl.UNSIGNED_BYTE, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+            const fbo = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+            const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            if (!complete) {
+                console.log('[pcvr] own fbo incomplete');
+                return null;
+            }
+
+            glDepth = {
+                prog: prog, vbo: vbo, fbo: fbo, tex: tex,
+                uDepth: gl.getUniformLocation(prog, 'uDepth'),
+                uLayer: gl.getUniformLocation(prog, 'uLayer'),
+                uToMeters: gl.getUniformLocation(prog, 'uToMeters')
+            };
+            console.log('[pcvr] depth pipeline ready (' +
+                (useFloat ? 'float sampler2DArray' : 'usampler2DArray texelFetch') + ')');
+            return glDepth;
+        }
+
+        function bindDepthPreview() {
+            if (!app.xr.views.availableDepth) return;
+            startDepthFrameLoop();
+        }
+
+        function ensureDepthQuad() {
+            if (depthPreview) return;
+            depthCanvas = document.createElement('canvas');
+            depthCanvas.width = DEPTH_W;
+            depthCanvas.height = DEPTH_H;
+            depthCtx = depthCanvas.getContext('2d');
+            depthImage = depthCtx.createImageData(DEPTH_W, DEPTH_H);
+
+            depthTexture = new pc.Texture(app.graphicsDevice, {
+                width: DEPTH_W, height: DEPTH_H, format: pc.PIXELFORMAT_RGBA8,
+                mipmaps: false,
+                addressU: pc.ADDRESS_CLAMP_TO_EDGE,
+                addressV: pc.ADDRESS_CLAMP_TO_EDGE
+            });
+            depthTexture.setSource(depthCanvas);
+
+            const m = new pc.StandardMaterial();
+            m.diffuse = new pc.Color(0, 0, 0);
+            m.emissive = new pc.Color(1, 1, 1);
+            m.emissiveMap = depthTexture;
+            m.useLighting = false;
+            m.update();
+
+            depthPreview = new pc.Entity('depth-preview');
+            depthPreview.addComponent('render', { type: 'plane', material: m, castShadows: false });
+            depthPreview.setLocalEulerAngles(90, 0, 0);
+
+            if (depthOverlay) {
+                /// pushed further out and sized below the full frustum so it sits
+                /// in the scene rather than pasted on the lens. ?ddist / ?dsize
+                /// tune it live without a redeploy.
+                const dist = depthDist;
+                const fovRad = (camera.camera.fov || 60) * Math.PI / 180;
+                const h = 2 * dist * Math.tan(fovRad / 2) * depthSize;
+                const w = h * 1.6;
+                m.blendType = pc.BLEND_NORMAL;
+                m.opacity = depthOpacity;
+                m.depthTest = false;
+                m.depthWrite = false;
+                m.update();
+                depthPreview.setLocalPosition(0, 0, -dist);
+                depthPreview.setLocalScale(w, 1, h);
+            } else {
+                depthPreview.setLocalPosition(0.56, -0.28, -1.1);
+                depthPreview.setLocalScale(0.34, 1, 0.34);
+            }
+            camera.addChild(depthPreview);
+        }
+
+        /// CPU path: metres straight out of the WebXR depth buffer, no GL involved
+        function cpuDepthGrid(view) {
+            ensureDepthQuad();
+            const data = depthImage.data;
+            let valid = 0;
+            let minD = Infinity;
+            let maxD = -Infinity;
+            const STEP = 5;
+            for (let y = 0; y < DEPTH_H; y++) {
+                for (let x = 0; x < DEPTH_W; x++) {
+                    const i = (y * DEPTH_W + x) * 4;
+                    let d = null;
+                    if ((x % STEP === 0) && (y % STEP === 0)) {
+                        d = view.getDepth(x / (DEPTH_W - 1), y / (DEPTH_H - 1));
+                        lastGridSample = d;
+                    } else {
+                        d = lastGridSample;
+                    }
+                    if (d === null || !isFinite(d) || d <= 0) {
+                        data[i] = 0; data[i + 1] = 180; data[i + 2] = 0;
+                    } else {
+                        valid++;
+                        if (d < minD) minD = d;
+                        if (d > maxD) maxD = d;
+                        const n = Math.min(d / 4, 1);
+                        data[i] = Math.round(255 * (1 - n));
+                        data[i + 1] = Math.round(255 * n * 0.7);
+                        data[i + 2] = Math.round(255 * n);
+                    }
+                    data[i + 3] = 255;
+                }
+            }
+            depthCtx.putImageData(depthImage, 0, 0);
+            depthTexture.upload();
+
+            if (!depthLogged) {
+                depthLogged = true;
+                console.log('[pcvr] CPU depth grid | valid=' + valid +
+                    ' min=' + (isFinite(minD) ? minD.toFixed(3) : 'n/a') +
+                    ' max=' + (isFinite(maxD) ? maxD.toFixed(3) : 'n/a') +
+                    ' centre=' + view.getDepth(0.5, 0.5));
+            }
+        }
+
+        let readFbo = null;
+        let depthBuf = null;
+        let readLogged = false;
+
+        function componentsFor(gl, fmt) {
+            if (fmt === gl.RED || fmt === gl.RED_INTEGER) return 1;
+            if (fmt === gl.RG || fmt === gl.RG_INTEGER) return 2;
+            if (fmt === gl.RGB || fmt === gl.RGB_INTEGER) return 3;
+            return 4;
+        }
+
+        function allocFor(gl, type, count) {
+            if (type === gl.FLOAT) return new Float32Array(count);
+            if (type === gl.UNSIGNED_SHORT || type === gl.SHORT ||
+                type === gl.UNSIGNED_SHORT_5_6_5) return new Uint16Array(count);
+            if (type === gl.UNSIGNED_INT || type === gl.INT) return new Uint32Array(count);
+            return new Uint8Array(count);
+        }
+
+        function blitDepth(frame, time0) {
+            const views = app.xr.views;
+            if (!views.availableDepth) return;
+
+            const space = app.xr._referenceSpace;
+            if (!space) return;
+            const pose = frame.getViewerPose(space);
+            if (!pose || !pose.views.length) return;
+
+            if (!views.depthGpuOptimized) {
+                if (views.list.length) cpuDepthGrid(views.list[0]);
+                return;
+            }
+
+            const gl = app.graphicsDevice.gl;
+            const g = initGlDepth();
+            if (!g) return;
+            if (!xrBinding) xrBinding = new XRWebGLBinding(app.xr.session, gl);
+
+            let di = null;
+            try {
+                di = xrBinding.getDepthInformation(pose.views[0]);
+            } catch (e) {
+                if (!depthErrLogged) {
+                    depthErrLogged = true;
+                    console.log('[pcvr] getDepthInformation threw: ' + e.message);
+                }
+                return;
+            }
+            if (!di || !di.texture) return;
+
+            lastDi = di;
+
+            const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+            const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+            const prevVp = gl.getParameter(gl.VIEWPORT);
+            const prevArr = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+            const prevVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+            const prevScissor = gl.isEnabled(gl.SCISSOR_TEST);
+            const prevCull = gl.isEnabled(gl.CULL_FACE);
+            const prevDepth = gl.isEnabled(gl.DEPTH_TEST);
+            const prevBlend = gl.isEnabled(gl.BLEND);
+            const prevActive = gl.getParameter(gl.ACTIVE_TEXTURE);
+
+            gl.bindVertexArray(null);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, g.fbo);
+            gl.viewport(0, 0, DEPTH_W, DEPTH_H);
+            gl.useProgram(g.prog);
+            gl.disable(gl.DEPTH_TEST);
+            gl.disable(gl.BLEND);
+            gl.disable(gl.SCISSOR_TEST);
+            gl.disable(gl.CULL_FACE);
+            gl.colorMask(true, true, true, true);
+
+            const UNIT = 15;
+            gl.activeTexture(gl.TEXTURE0 + UNIT);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindTexture(gl.TEXTURE_2D_ARRAY, di.texture);
+            /// no texParameteri: opaque texture, and the UA already gives it
+            /// texStorage-like completeness
+            gl.uniform1i(g.uDepth, UNIT);
+            gl.uniform1f(g.uLayer, di.imageIndex || 0);
+            gl.uniform1f(g.uToMeters, di.rawValueToMeters || 1);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, g.vbo);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+            while (gl.getError() !== gl.NO_ERROR) { /* drain */ }
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            const drawErr = gl.getError();
+
+            if (!depthPixels) depthPixels = new Uint8Array(DEPTH_W * DEPTH_H * 4);
+            gl.readPixels(0, 0, DEPTH_W, DEPTH_H, gl.RGBA, gl.UNSIGNED_BYTE, depthPixels);
+
+            gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
+            gl.useProgram(prevProg);
+            gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+            gl.bindBuffer(gl.ARRAY_BUFFER, prevArr);
+            gl.bindVertexArray(prevVao);
+            gl.activeTexture(prevActive);
+            if (prevScissor) gl.enable(gl.SCISSOR_TEST);
+            if (prevCull) gl.enable(gl.CULL_FACE);
+            if (prevDepth) gl.enable(gl.DEPTH_TEST);
+            if (prevBlend) gl.enable(gl.BLEND);
+
+            /// decode the packed 16-bit metres and paint the quad
+            ensureDepthQuad();
+            const src = depthPixels;
+            const px = depthImage.data;
+            let valid = 0, minD = Infinity, maxD = -Infinity;
+            const rowBytes = DEPTH_W * 4;
+
+            /// first pass: find the range of non-zero samples this frame
+            let qLo = 65535, qHi = 0;
+            for (let i2 = 0; i2 < src.length; i2 += 4) {
+                const q2 = src[i2] * 256 + src[i2 + 1];
+                if (q2 === 0) continue;
+                if (q2 < qLo) qLo = q2;
+                if (q2 > qHi) qHi = q2;
+            }
+            const qSpan = Math.max(1, qHi - qLo);
+            lastRawLo = qLo;
+            lastRawHi = qHi;
+
+            for (let y = 0; y < DEPTH_H; y++) {
+                /// readPixels is bottom-up and ImageData is top-down, but the XR
+                /// depth texture may already be oriented - ?dflip=0 to compare
+                const sy = depthFlip ? (DEPTH_H - 1 - y) : y;
+                const s0 = sy * rowBytes;
+                for (let x = 0; x < DEPTH_W; x++) {
+                    const sx = depthMirror ? (DEPTH_W - 1 - x) : x;
+                    const si = s0 + sx * 4;
+                    const q = src[si] * 256 + src[si + 1];
+                    const d = rawToMetres(q);
+                    const i = (y * DEPTH_W + x) * 4;
+                    if (q === 0) {
+                        px[i] = 0; px[i + 1] = 180; px[i + 2] = 0;
+                        px[i + 3] = depthOverlay ? 0 : 255;
+                        continue;
+                    } else {
+                        valid++;
+                        if (d < minD) minD = d;
+                        if (d > maxD) maxD = d;
+                        const n = (q - qLo) / qSpan;
+                        px[i] = Math.round(255 * (1 - n));
+                        px[i + 1] = Math.round(255 * n * 0.7);
+                        px[i + 2] = Math.round(255 * n);
+                    }
+                    px[i + 3] = 255;
+                }
+            }
+            depthCtx.putImageData(depthImage, 0, 0);
+            depthTexture.upload();
+
+            if (cloudOn) {
+                try {
+                    updateCloud(views.list[di.imageIndex || 0], src);
+                } catch (e) {
+                    if (!depthErrLogged) {
+                        depthErrLogged = true;
+                        console.log('[pcvr] cloud update failed: ' + e.message);
+                    }
+                }
+            }
+
+            const ci = ((DEPTH_H >> 1) * DEPTH_W + (DEPTH_W >> 1)) * 4;
+            lastDepthRaw = src[ci] * 256 + src[ci + 1];
+            lastDepthCentre = rawToMetres(lastDepthRaw);
+
+            /// histogram every ~2s: min/max hid whether this is graded or binary
+            if (time0 - lastHist > 2000) {
+                lastHist = time0;
+                const b = [0, 0, 0, 0, 0, 0];
+                for (let y = 0; y < DEPTH_H; y += 2) {
+                    for (let x = 0; x < DEPTH_W; x += 2) {
+                        const si = ((DEPTH_H - 1 - y) * DEPTH_W + x) * 4;
+                        const q = src[si] * 256 + src[si + 1];
+                        if (q === 0) b[0]++;
+                        else if (q === 65535) b[5]++;
+                        else if (q < 1000) b[1]++;
+                        else if (q < 5000) b[2]++;
+                        else if (q < 20000) b[3]++;
+                        else b[4]++;
+                    }
+                }
+                console.log('[pcvr] hist zero=' + b[0] + ' <1k=' + b[1] +
+                    ' 1k-5k=' + b[2] + ' 5k-20k=' + b[3] + ' 20k-65k=' + b[4] +
+                    ' sat=' + b[5] + ' | rawCentre=' + lastDepthRaw);
+            }
+
+            if (!readLogged) {
+                readLogged = true;
+                console.log('[pcvr] DEPTH SAMPLE | drawErr=' + drawErr +
+                    ' toMeters=' + di.rawValueToMeters +
+                    ' valid=' + valid + '/' + (DEPTH_W * DEPTH_H) +
+                    ' min=' + (isFinite(minD) ? minD.toFixed(3) : 'n/a') +
+                    ' max=' + (isFinite(maxD) ? maxD.toFixed(3) : 'n/a') +
+                    ' centre=' + lastDepthCentre.toFixed(3) + 'm' +
+                    ' rawCentre=' + (src[ci] * 256 + src[ci + 1]) +
+                    ' scale=' + depthScale);
+            }
+        }
+
+        let fps = 0;
+        let frameCount = 0;
+        let frameAccum = 0;
+        app.on('update', function (dt) {
+            frameCount++;
+            frameAccum += dt;
+            if (frameAccum >= 0.5) {
+                fps = frameCount / frameAccum;
+                frameCount = 0;
+                frameAccum = 0;
+                refreshPanel();
+            }
+        });
+
+        /// ---- session plumbing ----
+        const hud = document.getElementById('hud');
+        const btn = document.getElementById('enter');
+        const status = document.getElementById('status');
+
+        function setStatus(msg, warn) {
+            status.textContent = msg;
+            status.classList.toggle('warn', !!warn);
+        }
+
+        let sessionRequested = false;
+
+        function startXR(reason) {
+            if (sessionRequested || app.xr.active) return;
+            sessionRequested = true;
+            console.log('[pcvr] requesting session (' + reason + ') scale=' + requestedScale +
+                ' mode=' + (arMode ? 'ar' : 'vr'));
+
+            const opts = {
+                framebufferScaleFactor: requestedScale,
+                callback: function (err) {
+                    if (err) {
+                        /// let a later trigger (the button, or availability
+                        /// arriving late) try again rather than latching off.
+                        sessionRequested = false;
+                        console.log('[pcvr] session failed: ' + err.message);
+                        /// a plain page load has no user activation - that is
+                        /// expected, not an error worth alarming anyone with
+                        if (/activation/i.test(err.message)) {
+                            setStatus('ready \u2014 tap the button to start', false);
+                        } else {
+                            setStatus(err.message, true);
+                        }
+                    } else {
+                        console.log('[pcvr] session started');
+                    }
+                }
+            };
+
+            if (sessionType === pc.XRTYPE_AR) {
+                /// the floor is passthrough now, so drop our own ground plane
+                floor.enabled = false;
+                opts.depthSensing = {
+                    usagePreference: depthUsagePref,
+                    dataFormatPreference: depthFormatPref
+                };
+            }
+
+            app.xr.start(camera.camera, sessionType, pc.XRSPACE_LOCALFLOOR, opts);
+        }
+
+        app.xr.on('end', function () {
+            /// these belong to the session that just ended
+            depthLoopSession = null;
+            lastDi = null;
+            lastDiViews[0] = null;
+            lastDiViews[1] = null;
+            xrBinding = null;
+            console.log('[pcvr] xr ended, depth handles dropped');
+        });
+
+        app.xr.on('start', function () {
+            if (demoOcclusion) {
+                loadSplat();
+                setTimeout(function () {
+                    window.pcvr.occlude(false);
+                    window.pcvr.prime(true);
+                    /// the splat may still be loading; place it when it lands
+                    placeSplatOnDesk(true);
+                }, 800);
+                /// the splat may still have been loading; place, do not re-anchor
+                setTimeout(function () { placeSplatOnDesk(false); }, 2500);
+            }
+            hud.classList.add('hidden');
+            /// transparent clear in AR so the real room shows behind the scene
+            if (app.xr.type === pc.XRTYPE_AR) {
+                camera.camera.clearColor = new pc.Color(0, 0, 0, 0);
+                console.log('[pcvr] ar clear colour set transparent');
+            }
+        });
+        app.xr.on('end', function () {
+            hud.classList.remove('hidden');
+            setStatus('session ended — tap to go back in');
+        });
+
+        btn.addEventListener('click', function () {
+            /// re-pick the session type at click time. The fallback timer below
+            /// fires while we are simply waiting for the user's tap, and used to
+            /// leave sessionType pinned to VR - which is why AR never started.
+            if (arMode && app.xr.isAvailable(pc.XRTYPE_AR)) {
+                sessionType = pc.XRTYPE_AR;
+                floor.enabled = false;
+            }
+            sessionRequested = false;
+            startXR('button');
+        });
+
+        if (demoOcclusion) {
+            document.querySelector('#hud h1').innerHTML = 'Real-world occlusion,<br />depth-tested';
+            document.getElementById('blurb').innerHTML =
+                'The headset&rsquo;s depth is written into the z-buffer, so virtual content &mdash; '
+                + 'including a <b>gaussian splat</b> &mdash; is hidden by your real hands.';
+        }
+        console.log('[pcvr] boot | build=' + BUILD + ' | xr.supported=' + app.xr.supported +
+            ' | available=' + app.xr.isAvailable(sessionType));
+        document.getElementById('eyebrow').textContent = 'WebXR · Quest 3 · build ' + BUILD;
+
+        if (!app.xr.supported) {
+            btn.disabled = true;
+            setStatus('this browser has no WebXR support', true);
+        } else {
+            /// Availability resolves asynchronously (navigator.xr.isSessionSupported),
+            /// so on a headset it is still false at load time. Auto-start has to hang
+            /// off this event as well, not just the synchronous read below.
+            /// Availability for each session type resolves independently and can
+            /// arrive in any order, so re-evaluate the choice on every event
+            /// instead of committing to one type up front. AR preferred, VR is
+            /// the floor, and a timeout guarantees we never sit in the OS splash.
+            let arResolved = false;
+            const startedAt = Date.now();
+
+            const tryStart = function (reason) {
+                if (sessionRequested || app.xr.active) return;
+
+                if (arMode && app.xr.isAvailable(pc.XRTYPE_AR)) {
+                    sessionType = pc.XRTYPE_AR;
+                    startXR(reason + ':ar');
+                    return;
+                }
+
+                /// immersive-vr availability lands a beat before immersive-ar, so
+                /// don't settle for VR until AR has actually reported in — otherwise
+                /// we always lose the race and never get passthrough.
+                if (arMode && !arResolved && Date.now() - startedAt < 1500) return;
+
+                if (app.xr.isAvailable(pc.XRTYPE_VR)) {
+                    sessionType = pc.XRTYPE_VR;
+                    floor.enabled = true;
+                    startXR(reason + ':vr');
+                }
+            };
+
+            [pc.XRTYPE_AR, pc.XRTYPE_VR].forEach(function (t) {
+                app.xr.on('available:' + t, function (available) {
+                    console.log('[pcvr] available:' + t + ' -> ' + available);
+                    if (t === pc.XRTYPE_AR) arResolved = true;
+                    btn.disabled = !(app.xr.isAvailable(pc.XRTYPE_VR) ||
+                        app.xr.isAvailable(pc.XRTYPE_AR));
+                    tryStart('event');
+                });
+            });
+
+            setStatus('checking your headset…');
+
+            /// Meta grants the activation to an immersive-mode PWA: "clicking the PWA
+            /// app icon is considered user action to create a WebXR session". So the
+            /// launch itself is the gesture — request as soon as a device is known.
+            tryStart('load');
+
+            /// An immersive-ar request can sit pending forever (permission prompt,
+            /// or activation the UA won't honour) — and because sessionRequested is
+            /// already true, nothing would ever retry. If no session is actually
+            /// live by now, drop the pending request and take VR instead.
+            setTimeout(function () {
+                if (app.xr.active) return;
+                if (arMode && app.xr.isAvailable(pc.XRTYPE_AR)) {
+                    /// AR is there, we are just waiting for a user gesture
+                    console.log('[pcvr] awaiting user activation, not downgrading');
+                    return;
+                }
+                console.log('[pcvr] no session, falling back to vr (was ' + sessionType + ')');
+                sessionRequested = false;
+                sessionType = pc.XRTYPE_VR;
+                floor.enabled = true;
+                startXR('timeout');
+            }, 10000);
+        }
+
+        /// flat fallback: slow orbit so a desktop / 2D launch is not a dead screen
+        app.on('update', function (dt) {
+            if (app.xr.active) return;
+            rig.rotate(0, 4 * dt, 0);
+        });
+
+        let lastFrameTime = 0;
+        let readbackOn = false;
+
+        /// cheap per-frame handle refresh - no GPU stall
+        function refreshDepthInfo(frame) {
+            const views = app.xr.views;
+            if (!views.availableDepth) { depthGateErr = 'availableDepth false'; return; }
+            const space = app.xr._referenceSpace;
+            if (!space) { depthGateErr = 'no reference space'; return; }
+            const pose = frame.getViewerPose(space);
+            if (!pose || !pose.views.length) { depthGateErr = 'no viewer pose'; return; }
+            depthGateErr = null;
+            depthRefreshCount++;
+            const gl = app.graphicsDevice.gl;
+            if (!xrBinding) xrBinding = new XRWebGLBinding(app.xr.session, gl);
+            for (let i = 0; i < pose.views.length && i < 2; i++) {
+                let d = null;
+                try { d = xrBinding.getDepthInformation(pose.views[i]); } catch (e) { d = null; }
+                if (d && d.texture) {
+                    lastDiViews[i] = d;
+                    if (i === 0) lastDi = d;
+                }
+            }
+        }
+
+        /// ---- per-eye screen-space depth composite ----
+        let eyeProg = null;
+        let eyeOn = !demoOcclusion;
+        let eyeAlpha = 0.6;
+        /// FIXED range - auto-contrast per frame makes a near object rescale the
+        /// whole scene, which reads as the background shifting when a hand appears
+        let eyeLo = 45000;
+        let eyeHi = 65535;
+        let lastDi = null;
+        const lastDiViews = [null, null];
+        let sweepSpeed = 0.25;
+        let sweepFixed = 0.5;
+        let sweepBands = 4.0;
+        let sweepSharp = 260.0;
+        let sweepDistLo = 0.15;
+        let sweepDistHi = 3.0;
+        let sweepEase = 2.0;
+        let fireDist = 0.4;
+        let fineBands = 45.0;   // rings per metre in the near field (~2cm)
+        let edgeAmt = 0.25;
+        let shadeAmt = 260.0;
+
+        function initEyeProg() {
+            const gl = app.graphicsDevice.gl;
+            if (eyeProg) return eyeProg;
+
+            const vs = compileShader(gl, gl.VERTEX_SHADER,
+                '#version 300 es\n' +
+                'out vec2 vUv;\n' +
+                'void main() {\n' +
+                '    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n' +
+                '    vUv = p;\n' +
+                '    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n' +
+                '}\n');
+            const fs = compileShader(gl, gl.FRAGMENT_SHADER,
+                '#version 300 es\n' +
+                'precision highp float;\n' +
+                'precision highp sampler2DArray;\n' +
+                'uniform sampler2DArray uDepth;\n' +
+                'uniform float uLayer;\n' +
+                'uniform float uLo;\n' +
+                'uniform float uHi;\n' +
+                'uniform float uAlpha;\n' +
+                'uniform float uSlice;\n' +
+                'uniform float uBands;\n' +
+                'uniform float uSharp;\n' +
+                'uniform float uNear;\n' +
+                'uniform float uFar;\n' +
+                'uniform float uSliceM;\n' +
+                'uniform float uTime;\n' +
+                'uniform float uFireDist;\n' +
+                'uniform float uFineBands;\n' +
+                'uniform float uEdge;\n' +
+                'uniform float uShade;\n' +
+                'uniform float uTexel;\n' +
+                'in vec2 vUv;\n' +
+                'out vec4 fragColor;\n' +
+                'void main() {\n' +
+                '    float raw = texture(uDepth, vec3(vUv, uLayer)).r * 65535.0;\n' +
+                '    if (raw <= 0.0) { discard; }\n' +
+                /// UNCLAMPED for contours and the sweep, so both keep working
+                /// past either end of the window. Clamping made every pixel
+                /// nearer than uLo collapse to n=0, which fract() turned into
+                /// one permanent band - a constant faint wash up close.
+                '    float nUn = (raw - uLo) / max(1.0, uHi - uLo);\n' +
+                '    float n = clamp(nUn, 0.0, 1.0);\n' +
+                /// topographic iso-depth contours
+                /// convert the projective value to metres, then do the sweep and
+                /// the contours in METRIC space. In raw space the near field eats
+                /// most of the range, so a linear sweep crawls up close and races
+                /// away in the distance - and the band is thin near, fat far.
+                '    float zz = raw / 65535.0;\n' +
+                '    float invd = (1.0 / uNear) - zz * ((1.0 / uNear) - (1.0 / uFar));\n' +
+                '    float dm = 1.0 / max(invd, 0.0001);\n' +
+                '    float ring = abs(fract(dm * uBands) - 0.5) * 2.0;\n' +
+                /// a hand is only a few cm deep, so the coarse rings barely
+                /// register on it - lay a much finer set over the near field
+                '    float fine = abs(fract(dm * uFineBands) - 0.5) * 2.0;\n' +
+                '    float nearMask = 1.0 - smoothstep(uFireDist * 0.9, uFireDist * 1.8, dm);\n' +
+                /// depth gradient: big local change means a silhouette edge,
+                /// which is what picks out fingers against what is behind them
+                '    float rL = texture(uDepth, vec3(vUv - vec2(uTexel, 0.0), uLayer)).r;\n' +
+                '    float rR = texture(uDepth, vec3(vUv + vec2(uTexel, 0.0), uLayer)).r;\n' +
+                '    float rU = texture(uDepth, vec3(vUv - vec2(0.0, uTexel), uLayer)).r;\n' +
+                '    float rD = texture(uDepth, vec3(vUv + vec2(0.0, uTexel), uLayer)).r;\n' +
+                '    float grad = abs(rR - rL) + abs(rD - rU);\n' +
+                '    float edge = smoothstep(0.0015, 0.010, grad) * uEdge;\n' +
+                /// crude surface normal straight from the depth slopes, lit from
+                /// upper-left. Gives the burning region real shading instead of a
+                /// flat glow - knuckles and finger curvature start to read.
+                '    vec3 nrm = normalize(vec3(-(rR - rL) * uShade, -(rD - rU) * uShade, 1.0));\n' +
+                '    float lam = clamp(dot(nrm, normalize(vec3(-0.45, -0.55, 0.70))), 0.0, 1.0);\n' +
+                '    float shade = 0.45 + 0.85 * lam;\n' +
+                '    float rim = pow(1.0 - abs(nrm.z), 2.0);\n' +
+                '    float contour = smoothstep(0.88, 1.0, ring);\n' +
+                /// a plane sweeping through the depth range
+                '    float dist = dm - uSliceM;\n' +
+                '    float glow = exp(-dist * dist * uSharp);\n' +
+                '    vec3 base = vec3(1.0 - n, n * 0.55, n);\n' +
+                '    float fineC = smoothstep(0.86, 1.0, fine) * nearMask;\n' +
+                '    vec3 col = base * 0.55 + vec3(0.25, 0.55, 0.75) * contour;\n' +
+                '    col += vec3(0.55, 0.75, 0.95) * fineC * 0.55;\n' +
+                '    col += vec3(1.0, 0.95, 0.85) * edge;\n' +
+                /// cyan halo plus a much tighter white-hot core, so the peak
+                /// reads as white lightning rather than saturated cyan
+                '    float core = exp(-dist * dist * uSharp * 8.0);\n' +
+                /// close up it burns like fire, further out it stays cold
+                /// lightning - blended over a short band around uFireDist
+                '    float fire = 1.0 - smoothstep(uFireDist * 0.8, uFireDist * 1.25, dm);\n' +
+                '    float flick = 0.86 + 0.14 * sin(uTime * 19.0 + dm * 26.0 + vUv.y * 37.0);\n' +
+                '    vec3 haloCol = mix(vec3(0.35, 0.85, 1.0), vec3(1.00, 0.38, 0.06) * flick, fire);\n' +
+                '    vec3 coreCol = mix(vec3(1.0, 1.0, 1.0), vec3(1.00, 0.88, 0.55), fire);\n' +
+                '    col += haloCol * glow * shade + haloCol * glow * rim * 0.6;\n' +
+                '    col += coreCol * core * 1.4 * (0.55 + 0.75 * lam);\n' +
+                '    float a = uAlpha * (0.30 + 0.70 * glow + 0.9 * core + 0.35 * contour + 0.30 * fineC + 0.55 * edge);\n' +
+                '    fragColor = vec4(col, clamp(a, 0.0, 1.0));\n' +
+                '}\n');
+            if (!vs || !fs) return null;
+
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                console.log('[pcvr] eye program link failed: ' + gl.getProgramInfoLog(prog));
+                return null;
+            }
+            eyeProg = {
+                prog: prog,
+                uDepth: gl.getUniformLocation(prog, 'uDepth'),
+                uLayer: gl.getUniformLocation(prog, 'uLayer'),
+                uLo: gl.getUniformLocation(prog, 'uLo'),
+                uHi: gl.getUniformLocation(prog, 'uHi'),
+                uAlpha: gl.getUniformLocation(prog, 'uAlpha'),
+                uSlice: gl.getUniformLocation(prog, 'uSlice'),
+                uBands: gl.getUniformLocation(prog, 'uBands'),
+                uSharp: gl.getUniformLocation(prog, 'uSharp'),
+                uNear: gl.getUniformLocation(prog, 'uNear'),
+                uFar: gl.getUniformLocation(prog, 'uFar'),
+                uSliceM: gl.getUniformLocation(prog, 'uSliceM'),
+                uTime: gl.getUniformLocation(prog, 'uTime'),
+                uFireDist: gl.getUniformLocation(prog, 'uFireDist'),
+                uFineBands: gl.getUniformLocation(prog, 'uFineBands'),
+                uEdge: gl.getUniformLocation(prog, 'uEdge'),
+                uTexel: gl.getUniformLocation(prog, 'uTexel')
+            };
+            console.log('[pcvr] per-eye composite program ready');
+            return eyeProg;
+        }
+
+        /// speed profile -> cumulative table -> inverted for phase lookup.
+        /// slow off the mark, slow again around focusDist (hand range), quicker
+        /// through the empty space in between and beyond.
+        let focusDist = 0.55;
+        let dwellAmt = 0.82;
+        let dwellWidth = 0.13;
+        /// share of the cycle spent on the slow near-field burn
+        let burnFrac = 0.75;
+        let sweepTable = null;
+
+        function buildSweepTable() {
+            const N = 256;
+            const speed = new Float64Array(N);
+            const cum = new Float64Array(N + 1);
+            const span = Math.max(0.0001, sweepDistHi - sweepDistLo);
+            const pf = (focusDist - sweepDistLo) / span;
+            let acc = 0;
+
+            for (let i = 0; i < N; i++) {
+                const t = (i + 0.5) / N;
+                const g = Math.exp(-((t - pf) * (t - pf)) / (2 * dwellWidth * dwellWidth));
+                /// (soft start) x (dwell at the focus distance)
+                const v = (0.30 + 0.70 * t) * (1 - dwellAmt * g);
+                speed[i] = Math.max(0.02, v);
+            }
+            for (let i = 0; i < N; i++) {
+                acc += speed[i];
+                cum[i + 1] = acc;
+            }
+            for (let i = 0; i <= N; i++) cum[i] /= acc;
+            sweepTable = { cum: cum, N: N };
+        }
+
+        function phaseToFrac(phase) {
+            if (!sweepTable) buildSweepTable();
+            const cum = sweepTable.cum;
+            const N = sweepTable.N;
+            let lo = 0;
+            let hi = N;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (cum[mid] < phase) lo = mid + 1; else hi = mid;
+            }
+            const i = Math.max(1, lo);
+            const denom = Math.max(1e-9, cum[i] - cum[i - 1]);
+            const t = (phase - cum[i - 1]) / denom;
+            return (i - 1 + t) / N;
+        }
+
+        /// draw after PlayCanvas has rendered, straight into the XR framebuffer
+        function compositeEyes() {
+            if (!eyeOn || !app.xr.active || !lastDi || !lastDi.texture) return;
+            const gl = app.graphicsDevice.gl;
+            const g = initEyeProg();
+            if (!g) return;
+
+            const views = app.xr.views.list;
+            if (!views.length) return;
+
+            const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+            const prevVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+            const prevVp = gl.getParameter(gl.VIEWPORT);
+            const prevBlend = gl.isEnabled(gl.BLEND);
+            const prevDepth = gl.isEnabled(gl.DEPTH_TEST);
+            const prevScissor = gl.isEnabled(gl.SCISSOR_TEST);
+            const prevActive = gl.getParameter(gl.ACTIVE_TEXTURE);
+
+            /// PlayCanvas has its own FBO bound at postrender, not the XR layer,
+            /// so target the XR framebuffer explicitly or the draw goes nowhere
+            let xrFb = null;
+            try { xrFb = app.xr.session.renderState.baseLayer.framebuffer; } catch (e) {}
+            const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+            if (xrFb !== undefined) gl.bindFramebuffer(gl.FRAMEBUFFER, xrFb);
+
+            gl.bindVertexArray(null);
+            gl.useProgram(g.prog);
+            gl.disable(gl.DEPTH_TEST);
+            gl.disable(gl.SCISSOR_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            const UNIT = 14;
+            gl.activeTexture(gl.TEXTURE0 + UNIT);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindTexture(gl.TEXTURE_2D_ARRAY, lastDi.texture);
+            gl.uniform1i(g.uDepth, UNIT);
+            gl.uniform1f(g.uLo, eyeLo);
+            gl.uniform1f(g.uHi, eyeHi);
+            gl.uniform1f(g.uAlpha, eyeAlpha);
+            /// sweep the slice through the depth range over time
+            /// travel in RAW depth units so the plane genuinely starts at 0 and
+            /// covers everything, rather than starting at whatever raw value the
+            /// contrast window's lower edge happens to sit on
+            const phase = sweepSpeed > 0
+                ? ((lastFrameTime * 0.001 * sweepSpeed) % 1.0)
+                : sweepFixed;
+            /// linear in metres, so the bolt travels at a constant real-world
+            /// speed and keeps a constant real-world thickness
+            /// Two explicit stages rather than one blended curve:
+            ///   burnFrac of the cycle creeps from the near plane out to fireDist
+            ///   the remainder accelerates away to the far end as lightning
+            let sliceM;
+            if (phase < burnFrac) {
+                const t = phase / Math.max(0.0001, burnFrac);
+                sliceM = sweepDistLo + (fireDist - sweepDistLo) * (t * t * (3 - 2 * t));
+            } else {
+                const t = (phase - burnFrac) / Math.max(0.0001, 1 - burnFrac);
+                sliceM = fireDist + (sweepDistHi - fireDist) * (t * t);
+            }
+            gl.uniform1f(g.uSlice, 0.0);
+            gl.uniform1f(g.uBands, sweepBands);
+            gl.uniform1f(g.uSharp, sweepSharp);
+            gl.uniform1f(g.uNear, depthNear);
+            gl.uniform1f(g.uFar, depthFar);
+            gl.uniform1f(g.uSliceM, sliceM);
+            gl.uniform1f(g.uTime, lastFrameTime * 0.001);
+            gl.uniform1f(g.uFireDist, fireDist);
+            gl.uniform1f(g.uFineBands, fineBands);
+            gl.uniform1f(g.uEdge, edgeAmt);
+            gl.uniform1f(g.uShade, shadeAmt);
+            gl.uniform1f(g.uTexel, 1.0 / DEPTH_W);
+
+            for (let i = 0; i < views.length; i++) {
+                const vp = views[i].viewport;
+                gl.viewport(vp.x, vp.y, vp.z, vp.w);
+                /// each eye samples ITS OWN layer of the depth array
+                gl.uniform1f(g.uLayer, i);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+            }
+
+            gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+            gl.useProgram(prevProg);
+            gl.bindVertexArray(prevVao);
+            gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+            gl.activeTexture(prevActive);
+            if (!prevBlend) gl.disable(gl.BLEND);
+            if (prevDepth) gl.enable(gl.DEPTH_TEST);
+            if (prevScissor) gl.enable(gl.SCISSOR_TEST);
+        }
+
+        app.on('postrender', compositeEyes);
+
+        /// ---- occlusion DEBUG VIEW ---------------------------------------
+        /// Nothing here writes depth. It draws, per eye, what the occlusion
+        /// test would have concluded, so a wrong answer is visible instead of
+        /// just being a hole in the picture:
+        ///
+        ///   background   sensor distance as a blue->red ramp over dbgLo..dbgHi
+        ///                (transparent where the sensor returned nothing)
+        ///   white ring   where a probe sphere actually is on screen
+        ///   red fill     sensor says "something is IN FRONT of this sphere"
+        ///                -> this is the region that would have been cut away
+        ///   green fill   sensor says "sphere is in front", nothing to cut
+        ///
+        /// If the red blob is not sitting on your hand, the two are misaligned.
+        let dbgProg = null;
+        let dbgOn = false;
+        let dbgMode = 1;          // 0 ramp only, 1 ramp + probe test, 2 test only
+        let dbgLo = 0.15;         // metres at the blue end
+        let dbgHi = 2.0;          // metres at the red end
+        let dbgAlpha = 0.5;
+        let dbgMetric = 0;        // 0 = projective near/far guess, 1 = API depthValueToMeters
+        let dbgUseUv = 1;         // apply the API depthUvMatrix
+        let dbgPerView = 1;       // per-view depth info + imageIndex, not layer==eye
+        let sceneDepthWarned = false;
+
+        function initDbgProg() {
+            const gl = app.graphicsDevice.gl;
+            if (dbgProg) return dbgProg;
+
+            const vs = compileShader(gl, gl.VERTEX_SHADER,
+                '#version 300 es\n' +
+                'out vec2 vUv;\n' +
+                'void main() {\n' +
+                '    vec2 q = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n' +
+                '    vUv = q;\n' +
+                '    gl_Position = vec4(q * 2.0 - 1.0, 0.0, 1.0);\n' +
+                '}\n');
+
+            const fs = compileShader(gl, gl.FRAGMENT_SHADER,
+                '#version 300 es\n' +
+                'precision highp float;\n' +
+                'precision highp sampler2DArray;\n' +
+                'uniform sampler2DArray uDepth;\n' +
+                'uniform float uLayer;\n' +
+                'uniform float uNear;\n' +
+                'uniform float uFar;\n' +
+                'uniform float uD2M;\n' +
+                'uniform float uMetric;\n' +
+                'uniform mat3 uUvM;\n' +
+                'uniform float uUseUv;\n' +
+                'uniform float uLo;\n' +
+                'uniform float uHi;\n' +
+                'uniform float uAlpha;\n' +
+                'uniform float uMode;\n' +
+                'uniform float uAspect;\n' +
+                'uniform float uNumProbes;\n' +
+                'uniform vec4 uProbe[4];\n' +
+                'uniform sampler2D uScene;\n' +
+                'uniform vec4 uVp;\n' +
+                'uniform vec2 uRt;\n' +
+                'uniform float uP10;\n' +
+                'uniform float uP14;\n' +
+                'uniform float uBias;\n' +
+                'in vec2 vUv;\n' +
+                'out vec4 fragColor;\n' +
+                'vec3 ramp(float t) {\n' +
+                '    t = clamp(t, 0.0, 1.0);\n' +
+                '    return clamp(vec3(1.6 - abs(4.0 * t - 3.0),\n' +
+                '                      1.6 - abs(4.0 * t - 2.0),\n' +
+                '                      1.6 - abs(4.0 * t - 1.0)), 0.0, 1.0);\n' +
+                '}\n' +
+                'void main() {\n' +
+                '    vec2 duv = uUseUv > 0.5 ? (uUvM * vec3(vUv, 1.0)).xy : vUv;\n' +
+                '    float raw = texture(uDepth, vec3(duv, uLayer)).r;\n' +
+                '    vec3 col = vec3(0.0);\n' +
+                '    float a = 0.0;\n' +
+                '    float dm = -1.0;\n' +
+                '    if (raw > 0.0) {\n' +
+                '        if (uMetric < 0.5) {\n' +
+                '            float invd = (1.0 / uNear) - raw * ((1.0 / uNear) - (1.0 / uFar));\n' +
+                '            dm = 1.0 / max(invd, 0.0001);\n' +
+                '        } else {\n' +
+                '            dm = raw * 65535.0 * uD2M;\n' +
+                '        }\n' +
+                '        if (uMode < 1.5) {\n' +
+                '            col = ramp((dm - uLo) / max(0.0001, uHi - uLo));\n' +
+                '            a = uAlpha;\n' +
+                '        }\n' +
+                '    }\n' +
+                '    if (uMode > 0.5 && uMode < 2.5) {\n' +
+                '        vec2 ndc = vUv * 2.0 - 1.0;\n' +
+                '        for (int i = 0; i < 4; i++) {\n' +
+                '            if (float(i) >= uNumProbes) break;\n' +
+                '            vec4 pr = uProbe[i];\n' +
+                '            if (pr.z <= 0.0) continue;\n' +
+                '            vec2 dd = ndc - pr.xy;\n' +
+                '            dd.x *= uAspect;\n' +
+                '            float r = length(dd);\n' +
+                '            if (r < pr.z) {\n' +
+                '                if (dm < 0.0) {\n' +
+                '                    col = mix(col, vec3(0.5), 0.5); a = max(a, 0.35);\n' +
+                '                } else if (dm < pr.w) {\n' +
+                '                    col = mix(col, vec3(1.0, 0.0, 0.0), 0.8); a = max(a, 0.6);\n' +
+                '                } else {\n' +
+                '                    col = mix(col, vec3(0.0, 0.5, 0.0), 0.45); a = max(a, 0.4);\n' +
+                '                }\n' +
+                '            } else if (r < pr.z * 1.05) {\n' +
+                '                col = vec3(1.0); a = 0.95;\n' +
+                '            }\n' +
+                '        }\n' +
+                '    }\n' +
+                '    if (uMode > 2.5) {\n' +
+                /// vUv is 0..1 inside THIS eye's viewport; the scene depth map
+                /// covers the whole render target, so remap before sampling
+                '        vec2 rtUv = (uVp.xy + vUv * uVp.zw) / uRt;\n' +
+                '        float sd = texture(uScene, rtUv).r;\n' +
+                '        float zndc = sd * 2.0 - 1.0;\n' +
+                '        float sceneM = uP14 / (zndc + uP10);\n' +
+                '        bool hasScene = sd < 0.999999;\n' +
+                '        if (uMode < 3.5) {\n' +
+                /// 3: what PlayCanvas thinks the scene depth is, same ramp
+                '            if (!hasScene) discard;\n' +
+                '            fragColor = vec4(ramp((sceneM - uLo) / max(0.0001, uHi - uLo)), uAlpha);\n' +
+                '            return;\n' +
+                '        } else if (uMode < 4.5) {\n' +
+                /// 4: the verdict, everywhere, drawn instead of applied
+                '            if (!hasScene) discard;\n' +
+                '            if (dm > 0.0 && dm < sceneM - uBias) {\n' +
+                '                fragColor = vec4(1.0, 0.0, 0.0, 0.6);\n' +
+                '            } else {\n' +
+                '                fragColor = vec4(0.0, 0.6, 0.0, 0.22);\n' +
+                '            }\n' +
+                '            return;\n' +
+                '        }\n' +
+                /// 5: apply it - clear the pixel so passthrough shows through
+                '        if (!hasScene) discard;\n' +
+                '        if (dm > 0.0 && dm < sceneM - uBias) { fragColor = vec4(0.0); return; }\n' +
+                '        discard;\n' +
+                '    }\n' +
+                '    if (a <= 0.0) discard;\n' +
+                '    fragColor = vec4(col, a);\n' +
+                '}\n');
+            if (!vs || !fs) return null;
+
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                console.log('[pcvr] debug program link failed: ' + gl.getProgramInfoLog(prog));
+                return null;
+            }
+            dbgProg = {
+                prog: prog,
+                uDepth: gl.getUniformLocation(prog, 'uDepth'),
+                uLayer: gl.getUniformLocation(prog, 'uLayer'),
+                uNear: gl.getUniformLocation(prog, 'uNear'),
+                uFar: gl.getUniformLocation(prog, 'uFar'),
+                uD2M: gl.getUniformLocation(prog, 'uD2M'),
+                uMetric: gl.getUniformLocation(prog, 'uMetric'),
+                uUvM: gl.getUniformLocation(prog, 'uUvM'),
+                uUseUv: gl.getUniformLocation(prog, 'uUseUv'),
+                uLo: gl.getUniformLocation(prog, 'uLo'),
+                uHi: gl.getUniformLocation(prog, 'uHi'),
+                uAlpha: gl.getUniformLocation(prog, 'uAlpha'),
+                uMode: gl.getUniformLocation(prog, 'uMode'),
+                uAspect: gl.getUniformLocation(prog, 'uAspect'),
+                uNumProbes: gl.getUniformLocation(prog, 'uNumProbes'),
+                uProbe: gl.getUniformLocation(prog, 'uProbe[0]'),
+                uScene: gl.getUniformLocation(prog, 'uScene'),
+                uVp: gl.getUniformLocation(prog, 'uVp'),
+                uRt: gl.getUniformLocation(prog, 'uRt'),
+                uP10: gl.getUniformLocation(prog, 'uP10'),
+                uP14: gl.getUniformLocation(prog, 'uP14'),
+                uBias: gl.getUniformLocation(prog, 'uBias')
+            };
+            console.log('[pcvr] debug view program ready');
+            return dbgProg;
+        }
+
+        /// PlayCanvas' scene depth map, as a raw GL handle we can bind ourselves
+        let sceneDepthRequested = false;
+        let lastSceneTex = null;
+        function sceneDepthGl() {
+            const st = app.graphicsDevice.scope.resolve('uSceneDepthMap');
+            const tex = st && st.value;
+            lastSceneTex = tex || null;
+            if (!tex || !tex.impl) return null;
+            return tex.impl._glTexture || null;
+        }
+        function requestSceneDepth(on) {
+            const cc = camera.camera;
+            if (!cc || typeof cc.requestSceneDepthMap !== 'function') return false;
+            if (on && sceneDepthRequested) return true;
+            if (!on && !sceneDepthRequested) return true;
+            cc.requestSceneDepthMap(on);
+            sceneDepthRequested = on;
+            return true;
+        }
+
+        /// where each probe lands on screen for THIS eye, plus how far away it is
+        const probeBuf = new Float32Array(16);
+        const dbgUv = new Float32Array(9);
+        function fillProbes(view) {
+            probeBuf.fill(0);
+            if (!probes || !probes.length) return 0;
+            const pm = view.projMat && view.projMat.data;
+            const pvm = view._projViewOffMat && view._projViewOffMat.data;
+            if (!pm || !pvm) return 0;
+            const n = Math.min(4, probes.length);
+            for (let i = 0; i < n; i++) {
+                const wp = probes[i].getPosition();
+                const x = wp.x, y = wp.y, z = wp.z;
+                /// straight to clip space with the engine's own view-projection
+                const cx = pvm[0] * x + pvm[4] * y + pvm[8] * z + pvm[12];
+                const cy = pvm[1] * x + pvm[5] * y + pvm[9] * z + pvm[13];
+                const cw = pvm[3] * x + pvm[7] * y + pvm[11] * z + pvm[15];
+                /// w is -z_eye, i.e. the distance along the view axis
+                if (cw <= 0.02) { probeBuf[i * 4 + 2] = 0; continue; }
+                const radius = probes[i].getLocalScale().x * 0.5;
+                probeBuf[i * 4 + 0] = cx / cw;
+                probeBuf[i * 4 + 1] = cy / cw;
+                probeBuf[i * 4 + 2] = radius * pm[5] / cw;
+                probeBuf[i * 4 + 3] = cw;
+            }
+            return n;
+        }
+
+        function drawDebug() {
+            if (!dbgOn || !app.xr.active) return;
+            const views = app.xr.views.list;
+            if (!views.length) return;
+            const di0 = lastDiViews[0] || lastDi;
+            if (!di0 || !di0.texture) return;
+            const gl = app.graphicsDevice.gl;
+            const g = initDbgProg();
+            if (!g) return;
+
+            const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+            const prevVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+            const prevVp = gl.getParameter(gl.VIEWPORT);
+            const prevBlend = gl.isEnabled(gl.BLEND);
+            const prevDepth = gl.isEnabled(gl.DEPTH_TEST);
+            const prevScissor = gl.isEnabled(gl.SCISSOR_TEST);
+            const prevActive = gl.getParameter(gl.ACTIVE_TEXTURE);
+
+            let xrFb = null;
+            try { xrFb = app.xr.session.renderState.baseLayer.framebuffer; } catch (e) {}
+            const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+            if (xrFb !== undefined) gl.bindFramebuffer(gl.FRAMEBUFFER, xrFb);
+
+            gl.bindVertexArray(null);
+            gl.useProgram(g.prog);
+            gl.disable(gl.DEPTH_TEST);
+            gl.disable(gl.SCISSOR_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            const UNIT = 12;
+            gl.activeTexture(gl.TEXTURE0 + UNIT);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.uniform1i(g.uDepth, UNIT);
+            gl.uniform1f(g.uNear, depthNear);
+            gl.uniform1f(g.uFar, depthFar);
+            gl.uniform1f(g.uMetric, dbgMetric);
+            gl.uniform1f(g.uUseUv, dbgUseUv);
+            gl.uniform1f(g.uLo, dbgLo);
+            gl.uniform1f(g.uHi, dbgHi);
+            gl.uniform1f(g.uAlpha, dbgAlpha);
+            gl.uniform1f(g.uMode, dbgMode);
+            gl.uniform1f(g.uBias, occBias);
+
+            /// modes 3+ need the scene depth; bail out visibly rather than
+            /// drawing something meaningless if it is not there yet
+            const SUNIT = 11;
+            if (dbgMode > 2.5) {
+                const sgl = sceneDepthGl();
+                if (!sgl) {
+                    if (!sceneDepthWarned) {
+                        sceneDepthWarned = true;
+                        console.log('[pcvr] scene depth map not available yet');
+                    }
+                    gl.useProgram(prevProg);
+                    gl.bindVertexArray(prevVao);
+                    if (prevFb !== undefined) gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+                    if (!prevBlend) gl.disable(gl.BLEND);
+                    if (prevDepth) gl.enable(gl.DEPTH_TEST);
+                    if (prevScissor) gl.enable(gl.SCISSOR_TEST);
+                    return;
+                }
+                gl.activeTexture(gl.TEXTURE0 + SUNIT);
+                gl.bindTexture(gl.TEXTURE_2D, sgl);
+                gl.uniform1i(g.uScene, SUNIT);
+                gl.uniform2f(g.uRt, lastSceneTex.width, lastSceneTex.height);
+                gl.activeTexture(gl.TEXTURE0 + UNIT);
+                /// mode 5 overwrites the pixel outright, it must not blend
+                if (dbgMode > 4.5) gl.disable(gl.BLEND);
+            }
+
+            for (let i = 0; i < views.length; i++) {
+                const view = views[i];
+                const di = (dbgPerView > 0.5 && lastDiViews[i]) ? lastDiViews[i] : di0;
+                const vp = view.viewport;
+                gl.viewport(vp.x, vp.y, vp.z, vp.w);
+                gl.bindTexture(gl.TEXTURE_2D_ARRAY, di.texture);
+                /// imageIndex is the authoritative array slice for this eye
+                const layer = (di.imageIndex !== undefined && di.imageIndex !== null)
+                    ? di.imageIndex : i;
+                gl.uniform1f(g.uLayer, layer);
+                gl.uniform1f(g.uD2M, di.rawValueToMeters || view.depthValueToMeters || 1.0);
+                /// depthUvMatrix maps normalised view UV -> normalised depth UV.
+                /// PlayCanvas hands it over as a Mat4; take the 2D affine part.
+                const m = view.depthUvMatrix && view.depthUvMatrix.data;
+                if (m) {
+                    dbgUv[0] = m[0]; dbgUv[1] = m[1]; dbgUv[2] = 0;
+                    dbgUv[3] = m[4]; dbgUv[4] = m[5]; dbgUv[5] = 0;
+                    dbgUv[6] = m[12]; dbgUv[7] = m[13]; dbgUv[8] = 1;
+                } else {
+                    dbgUv[0] = 1; dbgUv[1] = 0; dbgUv[2] = 0;
+                    dbgUv[3] = 0; dbgUv[4] = 1; dbgUv[5] = 0;
+                    dbgUv[6] = 0; dbgUv[7] = 0; dbgUv[8] = 1;
+                }
+                gl.uniformMatrix3fv(g.uUvM, false, dbgUv);
+                gl.uniform1f(g.uAspect, vp.z / Math.max(1, vp.w));
+                gl.uniform4f(g.uVp, vp.x, vp.y, vp.z, vp.w);
+                const pmd = view.projMat && view.projMat.data;
+                gl.uniform1f(g.uP10, pmd ? pmd[10] : -1.001);
+                gl.uniform1f(g.uP14, pmd ? pmd[14] : -0.2001);
+                const n = fillProbes(view);
+                gl.uniform1f(g.uNumProbes, n);
+                gl.uniform4fv(g.uProbe, probeBuf);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+            }
+
+            if (prevFb !== undefined) gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+            gl.useProgram(prevProg);
+            gl.bindVertexArray(prevVao);
+            gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+            gl.activeTexture(prevActive);
+            if (!prevBlend) gl.disable(gl.BLEND);
+            if (prevDepth) gl.enable(gl.DEPTH_TEST);
+            if (prevScissor) gl.enable(gl.SCISSOR_TEST);
+        }
+
+        /// ---- depth prime: the real occluder -----------------------------
+        let primeProg = null;
+        let primeOn = false;
+        let primeBias = 0.02;      // metres; push the real world slightly back
+        let primeSmooth = 6;       // 0 nearest 1 bilinear 2 tent 3 edge-snap 4 fxaa 6 MLAA
+        let primeSubpix = 0.75;    // fxaa sub-pixel aliasing strength
+        let primeSoften = 0.75;    // texels; feather applied AFTER edge reconstruction
+        let primeEdge = 0.01;      // raw units; below this there is no edge to snap to
+        let primeSigma = 0.7;      // gauss width, texels
+        let primeGaussR = 2.0;     // gauss kernel radius, texels
+        let primeRunMax = 16.0;    // run search length; 14 covers a 4 degree edge
+        let primeHardK = 20.0;     // hardening slope; high keeps the edge
+                                   // independent of the background
+        let primeLayer = null;
+        let primeAnchor = null;
+        let primeErr = null;
+        let primeDraws = 0;
+
+        function ensurePrimeLayer() {
+            if (primeLayer) return primeLayer;
+            primeLayer = new pc.Layer({ name: 'DepthPrime' });
+            /// index 0 = first render action, so it takes the camera's clear
+            app.scene.layers.insert(primeLayer, 0);
+            const cc = camera.camera;
+            if (cc.layers.indexOf(primeLayer.id) === -1) {
+                cc.layers = [primeLayer.id].concat(cc.layers);
+            }
+            /// a mesh instance so the layer definitely produces a render action.
+            /// It writes nothing - no colour, no depth.
+            const m = new pc.StandardMaterial();
+            m.depthWrite = false;
+            m.depthTest = false;
+            m.redWrite = false;
+            m.greenWrite = false;
+            m.blueWrite = false;
+            m.alphaWrite = false;
+            m.update();
+            primeAnchor = new pc.Entity('depth-prime-anchor');
+            primeAnchor.addComponent('render', {
+                type: 'plane',
+                material: m,
+                layers: [primeLayer.id]
+            });
+            primeAnchor.setLocalScale(0.01, 0.01, 0.01);
+            camera.addChild(primeAnchor);
+            primeAnchor.setLocalPosition(0, 0, -0.5);
+            console.log('[pcvr] depth prime layer inserted at 0');
+            return primeLayer;
+        }
+
+        function initPrimeProg() {
+            const gl = app.graphicsDevice.gl;
+            if (primeProg) return primeProg;
+            const vs = compileShader(gl, gl.VERTEX_SHADER,
+                '#version 300 es\n' +
+                'out vec2 vUv;\n' +
+                'void main() {\n' +
+                '    vec2 q = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n' +
+                '    vUv = q;\n' +
+                '    gl_Position = vec4(q * 2.0 - 1.0, 0.0, 1.0);\n' +
+                '}\n');
+            const fs = compileShader(gl, gl.FRAGMENT_SHADER,
+                '#version 300 es\n' +
+                'precision highp float;\n' +
+                'precision highp sampler2DArray;\n' +
+                'uniform sampler2DArray uDepth;\n' +
+                'uniform float uLayer;\n' +
+                'uniform float uNear;\n' +
+                'uniform float uFar;\n' +
+                'uniform float uP10;\n' +
+                'uniform float uP14;\n' +
+                'uniform float uBias;\n' +
+                'uniform float uSmooth;\n' +
+                'uniform float uEdgeT;\n' +
+                'uniform float uSigma;\n' +
+                'uniform float uHardK;\n' +
+                'uniform float uGaussR;\n' +
+                'uniform float uRunMax;\n' +
+                'uniform float uSubpix;\n' +
+                'uniform float uSoften;\n' +
+                'uniform vec2 uTexSize;\n' +
+                'in vec2 vUv;\n' +
+                'out vec4 fragColor;\n' +
+                /// one tap, carrying its own validity as the weight
+                'vec2 tap(vec2 uv, float w) {\n' +
+                '    float r = texture(uDepth, vec3(uv, uLayer)).r;\n' +
+                '    return r > 0.0 ? vec2(r * w, w) : vec2(0.0);\n' +
+                '}\n' +
+                /// blended value plus the local near/far extremes, zeros excluded
+                'vec3 gather(vec2 uv) {\n' +
+                '    vec2 ts = uTexSize;\n' +
+                '    vec2 p = uv * ts - 0.5;\n' +
+                '    vec2 f = fract(p);\n' +
+                '    vec2 b = floor(p) + 0.5;\n' +
+                '    vec2 acc = vec2(0.0);\n' +
+                '    float mn = 1.0;\n' +
+                '    float mx = 0.0;\n' +
+                '    for (int j = 0; j <= 1; j++) {\n' +
+                '        for (int i = 0; i <= 1; i++) {\n' +
+                '            vec2 o = vec2(float(i), float(j));\n' +
+                '            float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);\n' +
+                '            float r = texture(uDepth, vec3((b + o) / ts, uLayer)).r;\n' +
+                '            if (r > 0.0) { acc += vec2(r * w, w); mn = min(mn, r); mx = max(mx, r); }\n' +
+                '        }\n' +
+                '    }\n' +
+                '    if (acc.y <= 0.0001) return vec3(0.0);\n' +
+                '    return vec3(acc.x / acc.y, mn, mx);\n' +
+                '}\n' +
+                'float lumaAt(vec2 uv, float c) {\n' +
+                '    float r = texture(uDepth, vec3(uv, uLayer)).r;\n' +
+                '    return r > 0.0 ? r : c;\n' +
+                '}\n' +
+                'float tentAt(vec2 uv, float radius, float c) {\n' +
+                '    if (radius <= 0.001) {\n' +
+                '        float r0 = texture(uDepth, vec3(uv, uLayer)).r;\n' +
+                '        return r0 > 0.0 ? r0 : c;\n' +
+                '    }\n' +
+                '    vec2 rcp = 1.0 / uTexSize;\n' +
+                '    float acc = 0.0;\n' +
+                '    float wsum = 0.0;\n' +
+                '    for (int j = -1; j <= 1; j++) {\n' +
+                '        for (int i = -1; i <= 1; i++) {\n' +
+                '            float w = (1.0 - abs(float(i)) * 0.5) * (1.0 - abs(float(j)) * 0.5);\n' +
+                '            vec2 o = vec2(float(i), float(j)) * radius * rcp;\n' +
+                '            float r0 = texture(uDepth, vec3(uv + o, uLayer)).r;\n' +
+                '            if (r0 > 0.0) { acc += r0 * w; wsum += w; }\n' +
+                '        }\n' +
+                '    }\n' +
+                '    return wsum > 0.0001 ? acc / wsum : c;\n' +
+                '}\n' +
+                'float fxaaDepth(vec2 uv) {\n' +
+                '    vec2 ts = uTexSize;\n' +
+                '    vec2 rcp = 1.0 / ts;\n' +
+                '    float m = texture(uDepth, vec3(uv, uLayer)).r;\n' +
+                '    if (m <= 0.0) return 0.0;\n' +
+                '    float n = lumaAt(uv + vec2(0.0, -rcp.y), m);\n' +
+                '    float s2 = lumaAt(uv + vec2(0.0, rcp.y), m);\n' +
+                '    float e = lumaAt(uv + vec2(rcp.x, 0.0), m);\n' +
+                '    float w = lumaAt(uv + vec2(-rcp.x, 0.0), m);\n' +
+                '    float mx = max(m, max(max(n, s2), max(e, w)));\n' +
+                '    float mn = min(m, min(min(n, s2), min(e, w)));\n' +
+                '    float range = mx - mn;\n' +
+                '    if (range < uEdgeT) return m;\n' +
+                '    float nw = lumaAt(uv + vec2(-rcp.x, -rcp.y), m);\n' +
+                '    float ne = lumaAt(uv + vec2(rcp.x, -rcp.y), m);\n' +
+                '    float sw = lumaAt(uv + vec2(-rcp.x, rcp.y), m);\n' +
+                '    float se = lumaAt(uv + vec2(rcp.x, rcp.y), m);\n' +
+                '    float ns = n + s2;\n' +
+                '    float we = w + e;\n' +
+                '    float nwsw = nw + sw;\n' +
+                '    float nese = ne + se;\n' +
+                '    float nwne = nw + ne;\n' +
+                '    float swse = sw + se;\n' +
+                '    float edgeH = abs(-2.0 * w + nwsw) + abs(-2.0 * m + ns) * 2.0 + abs(-2.0 * e + nese);\n' +
+                '    float edgeV = abs(-2.0 * n + nwne) + abs(-2.0 * m + we) * 2.0 + abs(-2.0 * s2 + swse);\n' +
+                '    bool horz = edgeH >= edgeV;\n' +
+                '    float l1 = horz ? n : w;\n' +
+                '    float l2 = horz ? s2 : e;\n' +
+                '    float g1 = l1 - m;\n' +
+                '    float g2 = l2 - m;\n' +
+                '    bool steep1 = abs(g1) >= abs(g2);\n' +
+                '    float gradScaled = 0.25 * max(abs(g1), abs(g2));\n' +
+                '    float stepLen = horz ? rcp.y : rcp.x;\n' +
+                '    float localAvg = 0.0;\n' +
+                '    if (steep1) { stepLen = -stepLen; localAvg = 0.5 * (l1 + m); }\n' +
+                '    else { localAvg = 0.5 * (l2 + m); }\n' +
+                '    vec2 cuv = uv;\n' +
+                '    if (horz) cuv.y += stepLen * 0.5; else cuv.x += stepLen * 0.5;\n' +
+                '    vec2 off = horz ? vec2(rcp.x, 0.0) : vec2(0.0, rcp.y);\n' +
+                '    vec2 uv1 = cuv - off;\n' +
+                '    vec2 uv2 = cuv + off;\n' +
+                '    float end1 = lumaAt(uv1, m) - localAvg;\n' +
+                '    float end2 = lumaAt(uv2, m) - localAvg;\n' +
+                '    bool done1 = abs(end1) >= gradScaled;\n' +
+                '    bool done2 = abs(end2) >= gradScaled;\n' +
+                '    if (!done1) uv1 -= off;\n' +
+                '    if (!done2) uv2 += off;\n' +
+                '    if (!(done1 && done2)) {\n' +
+                '        for (int i = 2; i < 12; i++) {\n' +
+                '            float q = (i < 5) ? 1.0 : ((i < 7) ? 1.5 : ((i < 9) ? 2.0 : 4.0));\n' +
+                '            if (!done1) { end1 = lumaAt(uv1, m) - localAvg; done1 = abs(end1) >= gradScaled; }\n' +
+                '            if (!done2) { end2 = lumaAt(uv2, m) - localAvg; done2 = abs(end2) >= gradScaled; }\n' +
+                '            if (done1 && done2) break;\n' +
+                '            if (!done1) uv1 -= off * q;\n' +
+                '            if (!done2) uv2 += off * q;\n' +
+                '        }\n' +
+                '    }\n' +
+                '    float d1 = horz ? (uv.x - uv1.x) : (uv.y - uv1.y);\n' +
+                '    float d2 = horz ? (uv2.x - uv.x) : (uv2.y - uv.y);\n' +
+                '    bool near1 = d1 < d2;\n' +
+                '    float dFinal = min(d1, d2);\n' +
+                '    float thick = d1 + d2;\n' +
+                '    float pixOff = -dFinal / max(thick, 1e-6) + 0.5;\n' +
+                '    bool centreSmaller = m < localAvg;\n' +
+                '    bool ok = ((near1 ? end1 : end2) < 0.0) != centreSmaller;\n' +
+                '    float finalOff = ok ? pixOff : 0.0;\n' +
+                '    float avg = (1.0 / 12.0) * (2.0 * (ns + we) + nwsw + nese);\n' +
+                '    float sp1 = clamp(abs(avg - m) / max(range, 1e-6), 0.0, 1.0);\n' +
+                '    float sp2 = (-2.0 * sp1 + 3.0) * sp1 * sp1;\n' +
+                '    finalOff = max(finalOff, sp2 * sp2 * uSubpix);\n' +
+                '    vec2 fuv = uv;\n' +
+                '    if (horz) fuv.y += finalOff * stepLen; else fuv.x += finalOff * stepLen;\n' +
+                '    return tentAt(fuv, uSoften, m);\n' +
+                '}\n' +
+                'float texI(float i, float j) {\n' +
+                '    return texture(uDepth, vec3((vec2(i, j) + 0.5) / uTexSize, uLayer)).r;\n' +
+                '}\n' +
+                'float biRaw(vec2 uv) {\n' +
+                '    vec3 g = gather(uv);\n' +
+                '    return g.y <= 0.0 ? 0.0 : g.x;\n' +
+                '}\n' +
+                'int clsAt(float i, float j, float level) {\n' +
+                '    return texI(i, j) > level ? 1 : 0;\n' +
+                '}\n' +
+                'float edgeAt(bool horz, float c, float guess, float level) {\n' +
+                '    for (int d = 0; d <= 2; d++) {\n' +
+                '        float g = guess - float(d);\n' +
+                '        int a1 = horz ? clsAt(c, g, level) : clsAt(g, c, level);\n' +
+                '        int b1 = horz ? clsAt(c, g + 1.0, level) : clsAt(g + 1.0, c, level);\n' +
+                '        if (a1 != b1) return g + 1.0;\n' +
+                '        if (d > 0) {\n' +
+                '            float g2 = guess + float(d);\n' +
+                '            int a2 = horz ? clsAt(c, g2, level) : clsAt(g2, c, level);\n' +
+                '            int b2 = horz ? clsAt(c, g2 + 1.0, level) : clsAt(g2 + 1.0, c, level);\n' +
+                '            if (a2 != b2) return g2 + 1.0;\n' +
+                '        }\n' +
+                '    }\n' +
+                '    return -9999.0;\n' +
+                '}\n' +
+                'vec4 mlaaAxis(bool horz, vec2 t, float level) {\n' +
+                '    float a = horz ? t.x : t.y;\n' +
+                '    float ia = floor(a);\n' +
+                '    float ib = floor(horz ? t.y : t.x);\n' +
+                '    float e0 = edgeAt(horz, ia, ib, level);\n' +
+                '    if (e0 < -9000.0) return vec4(0.0, 0.0, 0.0, -1.0);\n' +
+                '    float L = 0.0;\n' +
+                '    int rmax = int(uRunMax);\n' +
+                '    for (int k = 0; k < rmax; k++) {\n' +
+                '        if (edgeAt(horz, ia - L - 1.0, ib, level) != e0) break;\n' +
+                '        L += 1.0;\n' +
+                '    }\n' +
+                '    float R = 0.0;\n' +
+                '    for (int k = 0; k < rmax; k++) {\n' +
+                '        if (edgeAt(horz, ia + R + 1.0, ib, level) != e0) break;\n' +
+                '        R += 1.0;\n' +
+                '    }\n' +
+                '    float N = L + R + 1.0;\n' +
+                '    float aStart = ia - L;\n' +
+                '    float eL = edgeAt(horz, aStart - 1.0, ib, level);\n' +
+                '    float eR = edgeAt(horz, aStart + N, ib, level);\n' +
+                '    float pos = 0.0;\n' +
+                '    if (eL == e0 - 1.0 && eR == e0 + 1.0) {\n' +
+                '        pos = e0 - 0.5 + (a - aStart) / N;\n' +
+                '    } else if (eL == e0 + 1.0 && eR == e0 - 1.0) {\n' +
+                '        pos = e0 + 0.5 - (a - aStart) / N;\n' +
+                /// anything that is not a clean ramp is "no stair found".
+                /// Guessing here is what produced the speckle.
+                '    } else {\n' +
+                '        return vec4(0.0, 0.0, 0.0, -1.0);\n' +
+                '    }\n' +
+                '    float nearS = horz ? texI(ia, e0 - 1.0) : texI(e0 - 1.0, ia);\n' +
+                '    float farS = horz ? texI(ia, e0) : texI(e0, ia);\n' +
+                '    return vec4(pos, nearS, farS, N);\n' +
+                '}\n' +
+                'float gaussHard(vec2 uv, float mn, float mx) {\n' +
+                '    float acc = 0.0;\n' +
+                '    float w = 0.0;\n' +
+                '    int gr = int(uGaussR);\n' +
+                '    for (int j = -gr; j <= gr; j++) {\n' +
+                '        for (int i = -gr; i <= gr; i++) {\n' +
+                '            float r = biRaw(uv + vec2(float(i), float(j)) / uTexSize);\n' +
+                '            if (r <= 0.0) continue;\n' +
+                '            float g = exp(-(float(i * i + j * j)) / (2.0 * uSigma * uSigma));\n' +
+                '            acc += r * g; w += g;\n' +
+                '        }\n' +
+                '    }\n' +
+                '    if (w <= 0.0) return 0.0;\n' +
+                '    float blur = acc / w;\n' +
+                '    float rng = mx - mn;\n' +
+                /// fade in the hardening rather than switching to it: a hard
+                /// switch between two formulas is itself a discontinuity
+                '    float f0 = uEdgeT * 0.5;\n' +
+                '    float f1 = uEdgeT * 1.5;\n' +
+                '    float wh = clamp((rng - f0) / max(1e-6, f1 - f0), 0.0, 1.0);\n' +
+                '    wh = wh * wh * (3.0 - 2.0 * wh);\n' +
+                '    if (wh <= 0.0) return blur;\n' +
+                /// t is a COVERAGE fraction, normalised by the local contrast,
+                /// so the hardened edge does not move when the background does
+                '    float t = (blur - mn) / max(rng, 1e-6);\n' +
+                '    float th = clamp((t - 0.5) * uHardK + 0.5, 0.0, 1.0);\n' +
+                '    return blur + ((mn + rng * th) - blur) * wh;\n' +
+                '}\n' +
+                'float mlaaRaw(vec2 uv) {\n' +
+                '    vec2 t = uv * uTexSize;\n' +
+                '    float ix = floor(t.x);\n' +
+                '    float iy = floor(t.y);\n' +
+                '    float mn = 1.0;\n' +
+                '    float mx = 0.0;\n' +
+                '    for (int j = -1; j <= 1; j++) {\n' +
+                '        for (int i = -1; i <= 1; i++) {\n' +
+                '            float r = texI(ix + float(i), iy + float(j));\n' +
+                '            if (r > 0.0) { mn = min(mn, r); mx = max(mx, r); }\n' +
+                '        }\n' +
+                '    }\n' +
+                '    if (mx - mn < uEdgeT) return biRaw(uv);\n' +
+                '    float level = 0.5 * (mn + mx);\n' +
+                /// both axes: the longer run is the shallower edge. Choosing an
+                /// axis up front gets steep edges wrong.
+                '    vec4 hh = mlaaAxis(true, t, level);\n' +
+                '    vec4 vv = mlaaAxis(false, t, level);\n' +
+                '    vec4 r = (hh.w >= vv.w) ? hh : vv;\n' +
+                '    float b = (hh.w >= vv.w) ? t.y : t.x;\n' +
+                /// a clean stair was found -> a hard pick between two MEASURED
+                /// depths. No blending, so the silhouette cannot change shape
+                /// when the background moves.
+                '    if (r.w >= 2.0) return b < r.x ? r.y : r.z;\n' +
+                /// no clean stair: MLAA has nothing to say here, and this is
+                /// exactly where gauss+harden is at its best
+                '    return gaussHard(uv, mn, mx);\n' +
+                '}\n' +
+                'float sampleRaw(vec2 uv) {\n' +
+                '    if (uSmooth < 0.5) return texture(uDepth, vec3(uv, uLayer)).r;\n' +
+                '    if (uSmooth > 5.5) return mlaaRaw(uv);\n' +
+                '    if (uSmooth > 3.5) return fxaaDepth(uv);\n' +
+                '    if (uSmooth > 1.5 && uSmooth < 2.5) {\n' +
+                /// wider tent, for comparison
+                '        vec2 ts = uTexSize;\n' +
+                '        vec2 p = uv * ts - 0.5;\n' +
+                '        vec2 f = fract(p);\n' +
+                '        vec2 b = floor(p) + 0.5;\n' +
+                '        vec2 acc = vec2(0.0);\n' +
+                '        for (int j = -1; j <= 1; j++) {\n' +
+                '            for (int i = -1; i <= 1; i++) {\n' +
+                '                vec2 o = vec2(float(i), float(j));\n' +
+                '                vec2 d = abs(o - f);\n' +
+                '                float w = max(0.0, 1.0 - d.x * 0.5) * max(0.0, 1.0 - d.y * 0.5);\n' +
+                '                acc += tap((b + o) / ts, w);\n' +
+                '            }\n' +
+                '        }\n' +
+                '        return acc.y > 0.0001 ? acc.x / acc.y : 0.0;\n' +
+                '    }\n' +
+                '    vec3 g = gather(uv);\n' +
+                '    if (g.y <= 0.0) return 0.0;\n' +
+                /// FXAA-flavoured: only act where there IS an edge, and then do
+                /// not average across it - pick the side the ramp is nearer to
+                '    if (uSmooth > 2.5 && (g.z - g.y) > uEdgeT) {\n' +
+                '        return (g.x - g.y) < (g.z - g.x) ? g.y : g.z;\n' +
+                '    }\n' +
+                '    return g.x;\n' +
+                '}\n' +
+                'void main() {\n' +
+                '    fragColor = vec4(0.0);\n' +
+                '    float raw = sampleRaw(vUv);\n' +
+                /// no reading -> leave it at the far plane, occlude nothing
+                '    if (raw <= 0.0) { gl_FragDepth = 1.0; return; }\n' +
+                '    float invd = (1.0 / uNear) - raw * ((1.0 / uNear) - (1.0 / uFar));\n' +
+                '    float dm = 1.0 / max(invd, 0.0001) + uBias;\n' +
+                /// sensor metres -> NDC z for THIS eye's projection -> [0,1]
+                '    float zndc = -uP10 + uP14 / max(dm, 0.01);\n' +
+                '    gl_FragDepth = clamp((zndc + 1.0) * 0.5, 0.0, 1.0);\n' +
+                '}\n');
+            if (!vs || !fs) {
+                /// a COMPILE failure used to return null with primeErr still
+                /// null, so a broken shader looked like "nothing is happening"
+                primeErr = 'prime shader failed to compile (see console)';
+                console.log('[pcvr] ' + primeErr);
+                return null;
+            }
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                primeErr = gl.getProgramInfoLog(prog);
+                console.log('[pcvr] prime program link failed: ' + primeErr);
+                return null;
+            }
+            primeProg = {
+                prog: prog,
+                uDepth: gl.getUniformLocation(prog, 'uDepth'),
+                uLayer: gl.getUniformLocation(prog, 'uLayer'),
+                uNear: gl.getUniformLocation(prog, 'uNear'),
+                uFar: gl.getUniformLocation(prog, 'uFar'),
+                uP10: gl.getUniformLocation(prog, 'uP10'),
+                uP14: gl.getUniformLocation(prog, 'uP14'),
+                uBias: gl.getUniformLocation(prog, 'uBias'),
+                uSmooth: gl.getUniformLocation(prog, 'uSmooth'),
+                uEdgeT: gl.getUniformLocation(prog, 'uEdgeT'),
+                uSigma: gl.getUniformLocation(prog, 'uSigma'),
+                uHardK: gl.getUniformLocation(prog, 'uHardK'),
+                uGaussR: gl.getUniformLocation(prog, 'uGaussR'),
+                uRunMax: gl.getUniformLocation(prog, 'uRunMax'),
+                uSubpix: gl.getUniformLocation(prog, 'uSubpix'),
+                uSoften: gl.getUniformLocation(prog, 'uSoften'),
+                uTexSize: gl.getUniformLocation(prog, 'uTexSize')
+            };
+            console.log('[pcvr] depth prime program ready');
+            return primeProg;
+        }
+
+        function runPrime() {
+            if (!primeOn || !app.xr.active) return;
+            const views = app.xr.views.list;
+            if (!views.length) return;
+            const di0 = lastDiViews[0] || lastDi;
+            if (!di0 || !di0.texture) return;
+            const gl = app.graphicsDevice.gl;
+            const g = initPrimeProg();
+            if (!g) return;
+
+            /// whatever framebuffer PlayCanvas is rendering this layer into is
+            /// exactly the one we want - do NOT rebind anything here
+            gl.bindVertexArray(null);
+            gl.useProgram(g.prog);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.ALWAYS);
+            gl.depthMask(true);
+            gl.disable(gl.BLEND);
+            gl.disable(gl.CULL_FACE);
+            gl.disable(gl.SCISSOR_TEST);
+            gl.colorMask(false, false, false, false);
+
+            const UNIT = 10;
+            gl.activeTexture(gl.TEXTURE0 + UNIT);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.uniform1i(g.uDepth, UNIT);
+            gl.uniform1f(g.uNear, depthNear);
+            gl.uniform1f(g.uFar, depthFar);
+            gl.uniform1f(g.uBias, primeBias);
+            gl.uniform1f(g.uSmooth, primeSmooth);
+            gl.uniform1f(g.uEdgeT, primeEdge);
+            gl.uniform1f(g.uSigma, primeSigma);
+            gl.uniform1f(g.uHardK, primeHardK);
+            gl.uniform1f(g.uGaussR, primeGaussR);
+            gl.uniform1f(g.uRunMax, primeRunMax);
+            gl.uniform1f(g.uSubpix, primeSubpix);
+            gl.uniform1f(g.uSoften, primeSoften);
+            gl.uniform2f(g.uTexSize, di0.width || DEPTH_W, di0.height || DEPTH_H);
+
+            for (let i = 0; i < views.length; i++) {
+                const view = views[i];
+                const di = lastDiViews[i] || di0;
+                if (!di || !di.texture) continue;
+                const vp = view.viewport;
+                const pm = view.projMat && view.projMat.data;
+                gl.viewport(vp.x, vp.y, vp.z, vp.w);
+                gl.bindTexture(gl.TEXTURE_2D_ARRAY, di.texture);
+                const slice = (di.imageIndex !== undefined && di.imageIndex !== null)
+                    ? di.imageIndex : i;
+                gl.uniform1f(g.uLayer, slice);
+                gl.uniform1f(g.uP10, pm ? pm[10] : -1.001);
+                gl.uniform1f(g.uP14, pm ? pm[14] : -0.2001);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+            }
+
+            gl.colorMask(true, true, true, true);
+            gl.depthFunc(gl.LESS);
+            primeDraws++;
+
+            /// We changed GL behind the device's back, so its cached state is
+            /// now a lie. Flip each cached value to something else and back so
+            /// the next draw re-applies it for real.
+            const gd = app.graphicsDevice;
+            try {
+                gd.setDepthState(pc.DepthState.WRITEDEPTH);
+                gd.setDepthState(pc.DepthState.DEFAULT);
+                gd.setBlendState(pc.BlendState.ALPHABLEND);
+                gd.setBlendState(pc.BlendState.NOBLEND);
+                gd.setCullMode(pc.CULLFACE_NONE);
+                gd.setCullMode(pc.CULLFACE_BACK);
+            } catch (e) {
+                primeErr = 'state restore: ' + e.message;
+            }
+        }
+
+        app.scene.on('postrender:layer', function (cam, layer, transparent) {
+            if (!primeOn || transparent) return;
+            if (!primeLayer || layer !== primeLayer) return;
+            runPrime();
+        });
+
+        app.on('postrender', drawDebug);
+
+
+
+        /// ---- world-space depth reconstruction ----
+        const CLOUD_STEP = 2;                     // sample every Nth texel
+        let cloudEntity = null;
+        let cloudMesh = null;
+        let cloudPos = null;
+        let cloudCol = null;
+        let cloudCount = 0;
+        let cloudOn = false;
+
+        function ensureCloud() {
+            if (cloudEntity) return cloudEntity;
+
+            const gw = Math.floor(DEPTH_W / CLOUD_STEP);
+            const gh = Math.floor(DEPTH_H / CLOUD_STEP);
+            cloudCount = gw * gh;
+            cloudPos = new Float32Array(cloudCount * 3);
+            cloudCol = new Float32Array(cloudCount * 4);
+
+            const mat = new pc.ShaderMaterial({
+                uniqueName: 'depthCloud',
+                attributes: {
+                    aPosition: pc.SEMANTIC_POSITION,
+                    aColor: pc.SEMANTIC_COLOR
+                },
+                vertexGLSL: [
+                    'attribute vec3 aPosition;',
+                    'attribute vec4 aColor;',
+                    'uniform mat4 matrix_model;',
+                    'uniform mat4 matrix_viewProjection;',
+                    'uniform float uPointSize;',
+                    'varying vec4 vColor;',
+                    'void main(void) {',
+                    '    vColor = aColor;',
+                    '    gl_Position = matrix_viewProjection * matrix_model * vec4(aPosition, 1.0);',
+                    '    gl_PointSize = uPointSize;',
+                    '}'
+                ].join('\n'),
+                fragmentGLSL: [
+                    'varying vec4 vColor;',
+                    'void main(void) {',
+                    '    gl_FragColor = vColor;',
+                    '}'
+                ].join('\n')
+            });
+            mat.setParameter('uPointSize', 14.0);
+            mat.blendType = pc.BLEND_NORMAL;
+            mat.depthWrite = true;
+            mat.depthTest = true;
+            mat.setParameter('uVisible', 0.0);
+            mat.update();
+
+            cloudMesh = new pc.Mesh(app.graphicsDevice);
+            cloudMesh.clear(true, false);
+            cloudMesh.setPositions(cloudPos);
+            cloudMesh.setColors(cloudCol, 4);
+            cloudMesh.update(pc.PRIMITIVE_POINTS);
+
+            const node = new pc.GraphNode();
+            const mi = new pc.MeshInstance(cloudMesh, mat, node);
+            mi.cull = false;
+
+            cloudEntity = new pc.Entity('depth-cloud');
+            cloudEntity.addComponent('render', { meshInstances: [mi] });
+            app.root.addChild(cloudEntity);
+            console.log('[pcvr] depth cloud created, points=' + cloudCount);
+            return cloudEntity;
+        }
+
+        /// unproject the depth buffer through the eye that captured it
+        function updateCloud(view, src) {
+            ensureCloud();
+            const pm = view.projMat.data;
+            /// 2.21 exposes only the private _viewInvMat; the public getter does
+            /// not exist, and calling it silently killed the whole update
+            const inv = view._viewInvMat || view.viewInvMat;
+            if (!inv) { console.log('[pcvr] no view inverse matrix'); return; }
+            const sx = pm[0], sy = pm[5], kx = pm[8], ky = pm[9];
+
+            const gw = Math.floor(DEPTH_W / CLOUD_STEP);
+            const gh = Math.floor(DEPTH_H / CLOUD_STEP);
+            const rowBytes = DEPTH_W * 4;
+            const tmp = new pc.Vec3();
+            let n = 0;
+
+            for (let gy = 0; gy < gh; gy++) {
+                const ty = gy * CLOUD_STEP;
+                const s0 = (DEPTH_H - 1 - ty) * rowBytes;
+                for (let gx = 0; gx < gw; gx++) {
+                    const tx = gx * CLOUD_STEP;
+                    const si = s0 + tx * 4;
+                    const q = src[si] * 256 + src[si + 1];
+                    const i3 = n * 3;
+                    const i4 = n * 4;
+                    n++;
+
+                    if (q === 0) {
+                        cloudCol[i4 + 3] = 0;
+                        continue;
+                    }
+
+                    const d = rawToMetres(q);
+                    /// ndc -> view space using this eye's frustum
+                    const ndcX = (tx / (DEPTH_W - 1)) * 2 - 1;
+                    const ndcY = (ty / (DEPTH_H - 1)) * 2 - 1;
+                    tmp.x = d * (ndcX - kx) / sx;
+                    tmp.y = d * (ndcY - ky) / sy;
+                    tmp.z = -d;
+                    inv.transformPoint(tmp, tmp);
+
+                    cloudPos[i3] = tmp.x;
+                    cloudPos[i3 + 1] = tmp.y;
+                    cloudPos[i3 + 2] = tmp.z;
+
+                    const t = Math.min(d / 4, 1);
+                    cloudCol[i4] = 1 - t;
+                    cloudCol[i4 + 1] = t * 0.7;
+                    cloudCol[i4 + 2] = t;
+                    cloudCol[i4 + 3] = 1;
+                }
+            }
+
+            cloudMesh.setPositions(cloudPos);
+            cloudMesh.setColors(cloudCol, 4);
+            cloudMesh.update(pc.PRIMITIVE_POINTS);
+        }
+
+        /// colour writes off, depth writes on: an invisible occluder
+        function setCloudDepthOnly(depthOnly) {
+            if (!cloudEntity) return;
+            const m = cloudEntity.render.meshInstances[0].material;
+            /// transparent fragments still write depth - an invisible occluder
+            m.setParameter('uVisible', depthOnly ? 0.0 : 1.0);
+            m.depthWrite = true;
+            m.depthTest = true;
+            m.update();
+        }
+
+        /// ---- real-world occlusion -------------------------------------
+        /// Prime the depth buffer from the sensor before PlayCanvas draws the
+        /// scene. Its geometry then depth-tests against the real room, so a hand
+        /// in front of a virtual object actually hides it.
+        ///
+        /// The sensor gives projective depth with its own near/far; the frame
+        /// buffer wants NDC depth for the CURRENT camera projection, so convert:
+        ///     z_ndc = -p[10] + p[14] / d      (d = metres, right-handed, -Z fwd)
+        ///     gl_FragDepth = (z_ndc + 1) * 0.5
+        let occProg = null;
+        let occOn = false;
+        let occBias = 0.02;          // metres, pushes real geometry slightly back
+
+        function initOccProg() {
+            const gl = app.graphicsDevice.gl;
+            if (occProg) return occProg;
+
+            const vs = compileShader(gl, gl.VERTEX_SHADER,
+                '#version 300 es\n' +
+                'out vec2 vUv;\n' +
+                'void main() {\n' +
+                '    vec2 q = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n' +
+                '    vUv = q;\n' +
+                '    gl_Position = vec4(q * 2.0 - 1.0, 0.0, 1.0);\n' +
+                '}\n');
+            const fs = compileShader(gl, gl.FRAGMENT_SHADER,
+                '#version 300 es\n' +
+                'precision highp float;\n' +
+                'precision highp sampler2DArray;\n' +
+                'uniform sampler2DArray uDepth;\n' +
+                'uniform float uLayer;\n' +
+                'uniform float uNear;\n' +
+                'uniform float uFar;\n' +
+                'uniform float uP10;\n' +
+                'uniform float uP14;\n' +
+                'uniform float uBias;\n' +
+                'in vec2 vUv;\n' +
+                'out vec4 fragColor;\n' +
+                'void main() {\n' +
+                '    float raw = texture(uDepth, vec3(vUv, uLayer)).r;\n' +
+                /// no reading here -> infinitely far, occlude nothing
+                '    if (raw <= 0.0) { gl_FragDepth = 1.0; fragColor = vec4(0.0); return; }\n' +
+                '    float invd = (1.0 / uNear) - raw * ((1.0 / uNear) - (1.0 / uFar));\n' +
+                '    float dm = 1.0 / max(invd, 0.0001) + uBias;\n' +
+                '    float zndc = -uP10 + uP14 / max(dm, 0.01);\n' +
+                '    gl_FragDepth = clamp((zndc + 1.0) * 0.5, 0.0, 1.0);\n' +
+                '    fragColor = vec4(0.0);\n' +
+                '}\n');
+            if (!vs || !fs) return null;
+
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                console.log('[pcvr] occlusion program link failed: ' + gl.getProgramInfoLog(prog));
+                return null;
+            }
+            occProg = {
+                prog: prog,
+                uDepth: gl.getUniformLocation(prog, 'uDepth'),
+                uLayer: gl.getUniformLocation(prog, 'uLayer'),
+                uNear: gl.getUniformLocation(prog, 'uNear'),
+                uFar: gl.getUniformLocation(prog, 'uFar'),
+                uP10: gl.getUniformLocation(prog, 'uP10'),
+                uP14: gl.getUniformLocation(prog, 'uP14'),
+                uBias: gl.getUniformLocation(prog, 'uBias')
+            };
+            console.log('[pcvr] occlusion depth-prime program ready');
+            return occProg;
+        }
+
+        /// runs before the scene draw, into whatever target PlayCanvas has bound
+        function primeDepth() {
+            if (!occOn || !app.xr.active || !lastDi || !lastDi.texture) return;
+            const gl = app.graphicsDevice.gl;
+            const g = initOccProg();
+            if (!g) return;
+            const views = app.xr.views.list;
+            if (!views.length) return;
+
+            const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+            const prevVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+            const prevVp = gl.getParameter(gl.VIEWPORT);
+            const prevActive = gl.getParameter(gl.ACTIVE_TEXTURE);
+            const prevDepth = gl.isEnabled(gl.DEPTH_TEST);
+            const prevScissor = gl.isEnabled(gl.SCISSOR_TEST);
+
+            gl.bindVertexArray(null);
+            gl.useProgram(g.prog);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.ALWAYS);
+            gl.depthMask(true);
+            gl.disable(gl.SCISSOR_TEST);
+            /// depth only - leave the colour buffer alone
+            gl.colorMask(false, false, false, false);
+
+            const UNIT = 13;
+            gl.activeTexture(gl.TEXTURE0 + UNIT);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindTexture(gl.TEXTURE_2D_ARRAY, lastDi.texture);
+            gl.uniform1i(g.uDepth, UNIT);
+            gl.uniform1f(g.uNear, depthNear);
+            gl.uniform1f(g.uFar, depthFar);
+            gl.uniform1f(g.uBias, occBias);
+
+            for (let i = 0; i < views.length; i++) {
+                const vp = views[i].viewport;
+                const pm = views[i].projMat.data;
+                gl.viewport(vp.x, vp.y, vp.z, vp.w);
+                gl.uniform1f(g.uLayer, i);
+                gl.uniform1f(g.uP10, pm[10]);
+                gl.uniform1f(g.uP14, pm[14]);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+            }
+
+            gl.colorMask(true, true, true, true);
+            gl.depthFunc(gl.LESS);
+            gl.useProgram(prevProg);
+            gl.bindVertexArray(prevVao);
+            gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+            gl.activeTexture(prevActive);
+            if (!prevDepth) gl.disable(gl.DEPTH_TEST);
+            if (prevScissor) gl.enable(gl.SCISSOR_TEST);
+        }
+
+        app.scene.on('prerender', primeDepth);
+
+        /// a few probes at arm's-length depths to test the occlusion against
+        let probes = null;
+        function ensureProbes() {
+            if (probes) return probes;
+            probes = [];
+            const spec = [
+                { p: [-0.28, 0.0, -0.55], c: [1.0, 0.35, 0.25] },
+                { p: [0.00, 0.10, -0.85], c: [0.35, 1.0, 0.55] },
+                { p: [0.30, -0.05, -1.20], c: [0.40, 0.60, 1.0] },
+                { p: [-0.10, -0.20, -1.60], c: [1.0, 0.85, 0.30] }
+            ];
+            for (let i = 0; i < spec.length; i++) {
+                const e = new pc.Entity('probe' + i);
+                e.addComponent('render', {
+                    type: 'sphere',
+                    material: material(spec[i].c[0], spec[i].c[1], spec[i].c[2], true)
+                });
+                /// place once, in WORLD space, relative to where the viewer is
+                /// standing now - camera-parented content just rides your head
+                const wp = camera.getPosition().clone();
+                const fwd = camera.forward.clone();
+                const right = camera.right.clone();
+                const up = camera.up.clone();
+                wp.add(right.mulScalar(spec[i].p[0]));
+                wp.add(up.mulScalar(spec[i].p[1]));
+                wp.add(fwd.mulScalar(-spec[i].p[2]));
+                e.setLocalScale(0.16, 0.16, 0.16);
+                app.root.addChild(e);
+                e.setPosition(wp);
+                probes.push(e);
+            }
+            return probes;
+        }
+
+        /// tuned on the headset: sits on the desk in front of a seated viewer
+        let splatFwd = 0.56;      // metres ahead
+        let splatDrop = 0.44;     // metres below eye height
+        let splatScale = 0.20;
+        let splatYaw = 90;        // degrees about world up
+
+        /// captured once, so later tweaks cannot drag him around the room
+        let splatAnchor = null;
+
+        function captureSplatAnchor() {
+            const cp = camera.getPosition().clone();
+            const f = camera.forward.clone();
+            f.y = 0;
+            if (f.length() < 0.001) f.set(0, 0, -1);
+            f.normalize();
+            splatAnchor = { pos: cp, fwd: f };
+            return splatAnchor;
+        }
+
+        function placeSplatOnDesk(reAnchor) {
+            if (!splatEntity) return null;
+            if (reAnchor || !splatAnchor) captureSplatAnchor();
+            const cp = splatAnchor.pos;
+            const f = splatAnchor.fwd;
+            const wp = cp.clone().add(f.clone().mulScalar(splatFwd));
+            wp.y = cp.y - splatDrop;
+            splatEntity.setPosition(wp);
+            splatEntity.setLocalScale(splatScale, splatScale, splatScale);
+            /// yaw about world up composed with the model's X-flip, so the flip
+            /// cannot invert the direction of the turn
+            const yaw = new pc.Quat().setFromAxisAngle(pc.Vec3.UP, splatYaw);
+            const flip = new pc.Quat().setFromEulerAngles(180, 0, 0);
+            splatEntity.setRotation(yaw.mul(flip));
+            return { fwd: splatFwd, drop: splatDrop, scale: splatScale, yaw: splatYaw };
+        }
+
+        /// ---- gaussian splat, for testing occlusion against real geometry ----
+        let splatEntity = null;
+        let splatAsset = null;
+        let splatLoading = false;
+
+        function loadSplat(cb) {
+            if (splatEntity) { if (cb) cb(null, splatEntity); return; }
+            if (splatLoading) return;
+            splatLoading = true;
+
+            const asset = new pc.Asset('biker', 'gsplat', { url: 'biker.ply' });
+            asset.on('load', function () {
+                splatAsset = asset;
+                splatEntity = new pc.Entity('splat');
+                splatEntity.addComponent('gsplat', { asset: asset });
+                /// most captures come in Y-down relative to PlayCanvas
+                splatEntity.setLocalScale(splatScale, splatScale, splatScale);
+                app.root.addChild(splatEntity);
+                placeSplatOnDesk();
+                splatLoading = false;
+                console.log('[pcvr] splat loaded');
+                if (cb) cb(null, splatEntity);
+            });
+            asset.on('error', function (err) {
+                splatLoading = false;
+                console.log('[pcvr] splat load failed: ' + err);
+                if (cb) cb(err);
+            });
+            app.assets.add(asset);
+            app.assets.load(asset);
+        }
+
+        /// Live tuning surface. Everything below is driven over the DevTools
+        /// connection, so geometry can be adjusted on the running session instead
+        /// of going round the deploy/cache/relaunch loop for every value.
+        function applyOverlayTransform() {
+            if (!depthPreview) return 'no overlay yet';
+            if (depthOverlay) {
+                const fovRad = (camera.camera.fov || 60) * Math.PI / 180;
+                const h = 2 * depthDist * Math.tan(fovRad / 2) * depthSize;
+                const w = h * 1.6;
+                depthPreview.setLocalPosition(0, 0, -depthDist);
+                depthPreview.setLocalScale(w, 1, h);
+                const m = depthPreview.render.material;
+                m.opacity = depthOpacity;
+                m.update();
+            }
+            return { dist: depthDist, size: depthSize, opacity: depthOpacity };
+        }
+
+        window.pcvr = {
+            /// geometry
+            place: function (d, sz) {
+                if (isFinite(d)) depthDist = d;
+                if (isFinite(sz)) depthSize = sz;
+                return applyOverlayTransform();
+            },
+            opacity: function (o) {
+                if (isFinite(o)) depthOpacity = o;
+                return applyOverlayTransform();
+            },
+            nudge: function (dx, dy) {
+                if (!depthPreview) return 'no overlay yet';
+                const p = depthPreview.getLocalPosition();
+                depthPreview.setLocalPosition(p.x + (dx || 0), p.y + (dy || 0), p.z);
+                return { x: p.x + (dx || 0), y: p.y + (dy || 0), z: p.z };
+            },
+            /// image orientation
+            flip: function (v) { depthFlip = !!v; return { flip: depthFlip }; },
+            mirror: function (v) { depthMirror = !!v; return { mirror: depthMirror }; },
+            /// depth units
+            scale: function (v) { if (isFinite(v)) depthScale = v; return { scale: depthScale }; },
+            /// visibility
+            show: function (v) {
+                if (depthPreview) depthPreview.enabled = !!v;
+                return { visible: !!v };
+            },
+            panel: function (v) {
+                panel.enabled = !!v;
+                return { panel: !!v };
+            },
+            cubes: function (v) {
+                for (let i = 0; i < cubes.length; i++) cubes[i].entity.enabled = !!v;
+                return { cubes: !!v };
+            },
+            /// world-space reconstruction - correct in BOTH eyes
+            cloud: function (v, step) {
+                cloudOn = !!v;
+                if (cloudOn) ensureCloud();
+                if (cloudEntity) cloudEntity.enabled = cloudOn;
+                if (depthPreview && cloudOn) depthPreview.enabled = false;
+                return { cloud: cloudOn, points: cloudCount };
+            },
+            splat: function (v) {
+                if (!v) {
+                    if (splatEntity) splatEntity.enabled = false;
+                    return { splat: false };
+                }
+                loadSplat();
+                if (splatEntity) splatEntity.enabled = true;
+                return { splat: true, loaded: !!splatEntity, loading: splatLoading };
+            },
+            /// desk placement, relative to wherever you are sitting
+            desk: function (fwd, drop, scale, yaw) {
+                if (isFinite(fwd)) splatFwd = fwd;
+                if (isFinite(drop)) splatDrop = drop;
+                if (isFinite(scale)) splatScale = scale;
+                if (isFinite(yaw)) splatYaw = yaw;
+                /// adjust against the stored anchor - never re-derive from the
+                /// live head pose, or a height tweak drags him sideways too
+                return placeSplatOnDesk(false) || 'splat not loaded';
+            },
+            /// deliberately re-anchor to where you are sitting now
+            deskHere: function () {
+                return placeSplatOnDesk(true) || 'splat not loaded';
+            },
+            splatPlace: function (x, y, z, scale) {
+                if (!splatEntity) return 'not loaded';
+                if (isFinite(x) && isFinite(y) && isFinite(z)) splatEntity.setLocalPosition(x, y, z);
+                if (isFinite(scale)) splatEntity.setLocalScale(scale, scale, scale);
+                const p2 = splatEntity.getLocalPosition();
+                const sc = splatEntity.getLocalScale();
+                return { pos: [p2.x, p2.y, p2.z], scale: sc.x };
+            },
+            splatRotate: function (rx, ry, rz) {
+                if (!splatEntity) return 'not loaded';
+                splatEntity.setLocalEulerAngles(rx || 0, ry || 0, rz || 0);
+                return { euler: [rx || 0, ry || 0, rz || 0] };
+            },
+            /// the real thing: sensor depth straight into the depth buffer,
+            /// before any geometry draws. Meshes and splats both just depth-test.
+            prime: function (v) {
+                primeOn = v === undefined ? true : !!v;
+                if (primeOn) {
+                    ensurePrimeLayer();
+                    /// the screen-space punch would double up on this
+                    dbgOn = false;
+                    occOn = false;
+                    eyeOn = false;
+                    camera.camera.clearDepthBuffer = true;
+                    requestSceneDepth(false);
+                }
+                return { prime: primeOn, bias: primeBias, layer: !!primeLayer };
+            },
+            primeBias: function (m) {
+                if (isFinite(m)) primeBias = m;
+                return { bias: primeBias };
+            },
+            smooth: function (n) {
+                if (isFinite(n)) primeSmooth = n;
+                return {
+                    smooth: primeSmooth,
+                    meaning: ['nearest (blocky)', 'bilinear (smooth, has a skirt)',
+                              'bilinear + 3x3 tent', 'edge-snap (FXAA-flavoured)',
+                              'FXAA (edge search + resample + feather)', '?',
+                              'MLAA strict + gauss-harden'][primeSmooth] || '?',
+                    sigma: primeSigma, hardK: primeHardK,
+                    soften: primeSoften,
+                    edgeThreshold: primeEdge,
+                    subpix: primeSubpix
+                };
+            },
+            subpix: function (v) {
+                if (isFinite(v)) primeSubpix = v;
+                return { subpix: primeSubpix };
+            },
+            soften: function (r) {
+                if (isFinite(r)) primeSoften = r;
+                return { soften: primeSoften, note: '0 = crisp FXAA, texels of the depth map' };
+            },
+            /// the two loop bounds that drive the cost
+            cost: function (gaussR, runMax) {
+                if (isFinite(gaussR)) primeGaussR = gaussR;
+                if (isFinite(runMax)) primeRunMax = runMax;
+                return {
+                    gaussRadius: primeGaussR,
+                    gaussTaps: (2 * primeGaussR + 1) * (2 * primeGaussR + 1),
+                    runMax: primeRunMax
+                };
+            },
+            gauss: function (sigma, k) {
+                if (isFinite(sigma)) primeSigma = sigma;
+                if (isFinite(k)) primeHardK = k;
+                return { sigma: primeSigma, hardK: primeHardK };
+            },
+            smoothEdge: function (t) {
+                if (isFinite(t)) primeEdge = t;
+                return { edgeThreshold: primeEdge };
+            },
+            primeStat: function () {
+                const ls = app.scene.layers;
+                return {
+                    on: primeOn,
+                    draws: primeDraws,
+                    err: primeErr,
+                    progReady: !!primeProg,
+                    order: ls.layerList.map(function (l, i) {
+                        return l.name + (ls.subLayerList[i] ? ':T' : ':O');
+                    }),
+                    camLayers: camera.camera.layers.slice(),
+                    clearDepth: camera.camera.clearDepthBuffer
+                };
+            },
+            debug: function (v) {
+                dbgOn = v === undefined ? true : !!v;
+                if (dbgOn) {
+                    occOn = false;
+                    eyeOn = false;
+                    camera.camera.clearDepthBuffer = true;
+                    if (cloudEntity) cloudEntity.enabled = false;
+                    ensureProbes();
+                }
+                return { debug: dbgOn, mode: dbgMode, metric: dbgMetric ? 'api-d2m' : 'projective' };
+            },
+            dbgMode: function (m) {
+                if (isFinite(m)) dbgMode = m;
+                const names = ['sensor ramp', 'sensor ramp + probe test', 'probe test only',
+                               'scene depth ramp', 'occlusion verdict (red = real world wins)',
+                               'occlusion APPLIED'];
+                /// modes 3+ compare against PlayCanvas' depth buffer
+                requestSceneDepth(dbgMode > 2.5);
+                sceneDepthWarned = false;
+                return { mode: dbgMode, meaning: names[dbgMode] || '?' };
+            },
+            /// shorthand: show me the verdict, then apply it
+            verdict: function () { return window.pcvr.dbgMode(4); },
+            apply: function () { return window.pcvr.dbgMode(5); },
+            sceneDepth: function () {
+                const sgl = sceneDepthGl();
+                return {
+                    requested: sceneDepthRequested,
+                    haveTexture: !!sgl,
+                    size: lastSceneTex ? [lastSceneTex.width, lastSceneTex.height] : null,
+                    format: lastSceneTex ? lastSceneTex.format : null
+                };
+            },
+            dbgRange: function (lo, hi) {
+                if (isFinite(lo)) dbgLo = lo;
+                if (isFinite(hi)) dbgHi = hi;
+                return { lo: dbgLo, hi: dbgHi };
+            },
+            dbgAlpha: function (a) {
+                if (isFinite(a)) dbgAlpha = a;
+                return { alpha: dbgAlpha };
+            },
+            dbgMetric: function (v) {
+                if (v !== undefined) dbgMetric = v ? 1 : 0;
+                return { metric: dbgMetric ? 'api depthValueToMeters (linear)' : 'projective near/far' };
+            },
+            dbgUv: function (v) {
+                if (v !== undefined) dbgUseUv = v ? 1 : 0;
+                return { useDepthUvMatrix: !!dbgUseUv };
+            },
+            dbgPerView: function (v) {
+                if (v !== undefined) dbgPerView = v ? 1 : 0;
+                return { perView: !!dbgPerView };
+            },
+            /// everything the API actually says, rather than what we assumed
+            dbg: function () {
+                const out = { build: BUILD, active: app.xr.active, probes: probes ? probes.length : 0 };
+                const views = app.xr.views.list;
+                out.views = views.map(function (v, i) {
+                    const di = lastDiViews[i];
+                    const uv = v.depthUvMatrix && v.depthUvMatrix.data;
+                    return {
+                        eye: v.eye,
+                        haveDi: !!(di && di.texture),
+                        imageIndex: di ? di.imageIndex : null,
+                        rawValueToMeters: di ? di.rawValueToMeters : null,
+                        depthValueToMeters: v.depthValueToMeters,
+                        depthW: di ? di.width : null,
+                        depthH: di ? di.height : null,
+                        uvMat: uv ? [uv[0], uv[1], uv[4], uv[5], uv[12], uv[13]] : null,
+                        proj: v.projMat ? Array.from(v.projMat.data).map(function (n) { return +n.toFixed(4); }) : null,
+                        viewport: v.viewport ? [v.viewport.x, v.viewport.y, v.viewport.z, v.viewport.w] : null
+                    };
+                });
+                out.depth = {
+                    availableDepth: app.xr.views.availableDepth,
+                    refreshes: depthRefreshCount,
+                    gateErr: depthGateErr,
+                    eyeOn: eyeOn, occOn: occOn, dbgOn: dbgOn,
+                    loopAlive: depthLoopSession === app.xr.session,
+                    haveTex0: !!(lastDiViews[0] && lastDiViews[0].texture),
+                    haveTex1: !!(lastDiViews[1] && lastDiViews[1].texture)
+                };
+                if (views.length) {
+                    const v0 = views[0];
+                    const n = fillProbes(v0);
+                    out.probeN = n;
+                    out.probeInputs = {
+                        hasProj: !!(v0.projMat && v0.projMat.data),
+                        hasView: !!(v0._viewMat && v0._viewMat.data),
+                        probesLen: probes ? probes.length : null
+                    };
+                    out.probeScreen = Array.from(probeBuf).map(function (n2) { return +n2.toFixed(4); });
+                }
+                out.scene = window.pcvr.sceneDepth();
+                out.settings = {
+                    mode: dbgMode, lo: dbgLo, hi: dbgHi, alpha: dbgAlpha,
+                    metric: dbgMetric ? 'api-d2m' : 'projective',
+                    near: depthNear, far: depthFar,
+                    useUv: !!dbgUseUv, perView: !!dbgPerView
+                };
+                return out;
+            },
+            occlude: function (v) {
+                occOn = !!v;
+                /// Depth clearing stays ON. primeDepth runs at scene 'prerender',
+                /// which is after the clear and before the draws, so the sensor
+                /// depth survives without the eyes fighting over a shared buffer.
+                camera.camera.clearDepthBuffer = true;
+                /// no CPU path needed at all
+                cloudOn = false;
+                if (cloudEntity) cloudEntity.enabled = false;
+                return { occlude: occOn, mode: 'gpu-zwrite' };
+            },
+            occluderVisible: function (v) {
+                setCloudDepthOnly(!v);
+                return { showing: !!v };
+            },
+            bias: function (m) {
+                if (isFinite(m)) occBias = m;
+                return { bias: occBias };
+            },
+            replaceProbes: function () {
+                ensureProbes();
+                const spec = [[-0.28, 0.0, 0.55], [0.0, 0.10, 0.85],
+                              [0.30, -0.05, 1.20], [-0.10, -0.20, 1.60]];
+                const wp0 = camera.getPosition();
+                const r = camera.right.clone();
+                const u = camera.up.clone();
+                const f = camera.forward.clone();
+                for (let i = 0; i < probes.length; i++) {
+                    const wp = wp0.clone();
+                    wp.add(r.clone().mulScalar(spec[i][0]));
+                    wp.add(u.clone().mulScalar(spec[i][1]));
+                    wp.add(f.clone().mulScalar(spec[i][2]));
+                    probes[i].enabled = true;
+                    probes[i].setPosition(wp);
+                }
+                return { replaced: probes.length };
+            },
+            probes: function (v) {
+                ensureProbes();
+                for (let i = 0; i < probes.length; i++) probes[i].enabled = !!v;
+                return { probes: !!v, count: probes.length };
+            },
+            eyes: function (v) {
+                eyeOn = !!v;
+                if (eyeOn) {
+                    if (depthPreview) depthPreview.enabled = false;
+                    if (cloudEntity) cloudEntity.enabled = false;
+                    cloudOn = false;
+                }
+                return { perEye: eyeOn };
+            },
+            sweepRange: function (lo, hi) {
+                if (isFinite(lo)) sweepDistLo = lo;
+                if (isFinite(hi)) sweepDistHi = hi;
+                buildSweepTable();
+                return { metresLo: sweepDistLo, metresHi: sweepDistHi };
+            },
+            burn: function (frac) {
+                if (isFinite(frac)) burnFrac = Math.min(0.95, Math.max(0.05, frac));
+                return { burnFrac: burnFrac, fireDist: fireDist };
+            },
+            focus: function (m, amount, width) {
+                if (isFinite(m)) focusDist = m;
+                if (isFinite(amount)) dwellAmt = Math.min(0.97, Math.max(0, amount));
+                if (isFinite(width)) dwellWidth = width;
+                buildSweepTable();
+                return { focusDist: focusDist, dwell: dwellAmt, width: dwellWidth };
+            },
+            detail: function (bands, edge) {
+                if (isFinite(bands)) fineBands = bands;
+                if (isFinite(edge)) edgeAmt = edge;
+                return { fineBands: fineBands, edge: edgeAmt };
+            },
+            shade: function (k) {
+                if (isFinite(k)) shadeAmt = k;
+                return { shade: shadeAmt };
+            },
+            fire: function (m) {
+                if (isFinite(m)) fireDist = m;
+                return { fireDist: fireDist };
+            },
+            sweep: function (speed) {
+                if (isFinite(speed)) sweepSpeed = speed;
+                return { speed: sweepSpeed };
+            },
+            slice: function (v) {
+                if (isFinite(v)) { sweepFixed = v; sweepSpeed = 0; }
+                return { slice: sweepFixed, speed: sweepSpeed };
+            },
+            bands: function (n) {
+                if (isFinite(n)) sweepBands = n;
+                return { bands: sweepBands };
+            },
+            sharp: function (v) {
+                if (isFinite(v)) sweepSharp = v;
+                return { sharp: sweepSharp };
+            },
+            /// the raw depth map as the sensor actually delivered it
+            grab: function () {
+                readbackOn = true;
+                if (!depthPixels) return { ready: false, note: 'blit has not run yet, call again in ~300ms' };
+                const n = DEPTH_W * DEPTH_H;
+                const bytes = new Uint8Array(n * 2);
+                for (let i = 0; i < n; i++) {
+                    /// blitDepth packs the 16-bit value as hi in R, lo in G
+                    bytes[i * 2] = depthPixels[i * 4];
+                    bytes[i * 2 + 1] = depthPixels[i * 4 + 1];
+                }
+                let bin = '';
+                const CH = 4096;
+                for (let i = 0; i < bytes.length; i += CH) {
+                    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+                }
+                return { ready: true, w: DEPTH_W, h: DEPTH_H, b64: btoa(bin) };
+            },
+            readback: function (v) {
+                readbackOn = !!v;
+                return { readback: readbackOn };
+            },
+            range: function (lo, hi) {
+                if (isFinite(lo)) eyeLo = lo;
+                if (isFinite(hi)) eyeHi = hi;
+                return { lo: eyeLo, hi: eyeHi, observedLo: lastRawLo, observedHi: lastRawHi };
+            },
+            eyeAlpha: function (a) {
+                if (isFinite(a)) eyeAlpha = a;
+                return { alpha: eyeAlpha };
+            },
+            nearFar: function (n, f) {
+                if (isFinite(n)) depthNear = n;
+                if (isFinite(f)) depthFar = f;
+                return { near: depthNear, far: depthFar, projective: depthProjective };
+            },
+            projective: function (v) {
+                depthProjective = !!v;
+                return { projective: depthProjective };
+            },
+            pointSize: function (px) {
+                if (!cloudEntity) return 'no cloud';
+                cloudEntity.render.meshInstances[0].material.setParameter('uPointSize', px);
+                return { pointSize: px };
+            },
+
+            /// readings
+            stats: function () {
+                return {
+                    build: BUILD,
+                    xr: app.xr.type,
+                    raw: lastDepthRaw,
+                    rawLo: lastRawLo,
+                    rawHi: lastRawHi,
+                    metres: rawToMetres(lastDepthRaw),
+                    scale: depthScale,
+                    dist: depthDist,
+                    size: depthSize,
+                    opacity: depthOpacity,
+                    flip: depthFlip,
+                    mirror: depthMirror,
+                    fps: Math.round(fps)
+                };
+            },
+            /// depth at an arbitrary point of the map, 0..1 normalised
+            at: function (u, v) {
+                if (!depthPixels) return null;
+                const x = Math.max(0, Math.min(DEPTH_W - 1, Math.round(u * (DEPTH_W - 1))));
+                const y = Math.max(0, Math.min(DEPTH_H - 1, Math.round(v * (DEPTH_H - 1))));
+                const i = ((DEPTH_H - 1 - y) * DEPTH_W + x) * 4;
+                const q = depthPixels[i] * 256 + depthPixels[i + 1];
+                return { raw: q, metres: rawToMetres(q) };
+            }
+        };
+        console.log('[pcvr] live control surface ready: window.pcvr');
+
+        app.start();
+    })();
+    </script>
+</body>
+</html>

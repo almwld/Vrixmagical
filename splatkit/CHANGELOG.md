@@ -1,0 +1,206 @@
+# Changelog
+
+Notable changes to the SplatKit Android SDK, the shared C++ engine and this repository's tooling.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); alphas may break APIs.
+iOS changes are in the [iOS changelog](packages/splatkit-ios/distribution/CHANGELOG.md) and React Native changes in the [React Native changelog](packages/react-native-splatkit/CHANGELOG.md).
+
+## [0.1.0-beta.3] - 2026-11-11
+
+### Added
+
+- Optional part labels: a world loads with one unsigned 16-bit label per splat, `SplatEngine::highlightParts` styles parts by label and `pickPart` returns the part under a ray once `setPartPickingEnabled` keeps CPU geometry.
+  Worlds without labels keep the default pipelines and pay nothing.
+- `SplatEngine::setHighlightLook` lets the host choose the highlight tint, tint amount, part brightness and the brightness of everything else; the defaults are the previous faint cyan style.
+- `setOrbitLimits` bounds the orbit and `frameBounds` eases it until given bounds fit the lens, optionally from a chosen direction.
+- `LoadOptions::expectedSha256`, `expectedLabelsSha256` and `expectedSplatCount` verify a world and its labels before they load; a mismatch fails the load and keeps the previous world.
+  PicoSHA2 ships with its notice in the Android library and the iOS framework.
+- `beginLoad` reserves a load that supersedes earlier decoding, pending uploads and their events.
+- Engine events `worldFrameReady` and `gpuFailed`; Android listeners get `onGpuFailed`.
+- Configurable reveal sweeps through `setReveal`.
+- Drawn frame queries: after `setDrawnFrameQueriesEnabled`, `pick` and `project` answer against the last drawn frame.
+- `render` returns whether it drew and `needsFrame` reports pending input, loads or streaming, so a host frame loop can sleep.
+- `RenderPolicy::backgroundColor`.
+- Public native renderer entry points, `splatkit/vulkan/VulkanRenderer.h` on Android and `SplatKit/metal/MetalRenderer.h` on iOS, for hosts that build a `SplatEngine` themselves.
+- Opt-in scaled 8-bit Vulkan SH storage through `SPLATKIT_VULKAN_SH8` / `splatkitVulkanSh8`, disabled by default.
+- Any of the 48 axis-aligned coordinate frames, named by three letters such as `rub`, `rdf` or `rfu`, as the source frame of a world, its tiles and its collider: `SplatEngine::setSourceFrame`, `SplatSurfaceView.sourceFrame` and `--source-frame` on `splat-convert`, `splat-tile`, `splat_collider`, `splat_lod_build` and `prepare-world.sh`.
+
+### Changed
+
+- Breaking: `SplatEngine::render` returns `bool`, and world loads return whether the request was accepted.
+- Breaking: labels that do not match their world fail as `labelsMismatch`, which platform hosts receive as a failed world.
+- The reveal test runs in the shared projection code of both backends; while no reveal runs it costs one comparison per splat.
+- Breaking: an SPZ loads in the frame its `SPZ_ADOBE_coordinate_system` tag declares, else in the SPZ default `rub`, so an untagged `rdf` file, such as a World Labs Marble export, needs source frame `rdf`.
+  PLY defaults to `rdf` and glTF to its own frame.
+- Breaking: `splat-convert` and `ply2spz` write untagged `rub` by default; any other `--target-frame` is tagged and needs `--spz-version 4`.
+
+### Fixed
+
+- SPZ v2 and v3 files that carry a frame tag load in that frame; the tag was dropped while reading.
+- Recoverable render failures stay out of the terminal GPU failure latch.
+- Automatic orbit stops at an azimuth limit instead of pressing against it, and `setOrbitLimits` and `frameBounds` cancel it.
+- The reveal clock starts on the first successful draw of the world instead of at load.
+- Completing a cut-short highlight fade keeps untinted looks instead of reading them as dimmed.
+
+## [0.1.0-beta.2] - 2026-10-23
+
+### Added
+
+- Offline SPZ v2/v3/v4 selection and explicit RDF/RUB normalization through `splat-convert`, `ply2spz` and `prepare-world.sh`, with pinned PlayCanvas/SplatTransform interoperability checks in CI.
+- Android Fabric adapter compilation and host tests join the React Native CI gate.
+- `ios-package.yml` builds a device/simulator XCFramework candidate with its checksum and source/Xcode provenance for release integration.
+
+### Fixed
+
+- The React Native mirror's `publish.yml` no longer passes `--prerelease`, so `react-native-splatkit` shows a Latest release the way the Android and iOS repositories already do.
+- The React Native example builds without warnings on either platform.
+  Its `Info.plist` no longer declares an empty `NSLocationWhenInUseUsageDescription`, which the app never used and App Store validation rejects, and `MainActivity` uses the `DefaultReactActivityDelegate` constructor React Native 0.87 has not deprecated.
+
+## [0.1.0-beta.1] - 2026-09-30
+
+### Added
+
+- Host-driven orbit, anchor, dolly, focus and look-at camera APIs, with revisioned requests in the shared engine and both native SDKs.
+
+### Fixed
+
+- Offline hierarchy construction splits cells until they hold at most 32 splats, avoiding stretched coarse parents.
+- Walking after an orbit restores a level horizon.
+- GLB colliders with an out-of-range default scene index are rejected.
+- Loading and empty-world frames clear to the background; the example shows loading state while replacing a world.
+- Vulkan pipeline construction owns each shader module for the build that uses it.
+
+## [0.1.0-alpha09] - 2026-09-21
+
+### Added
+
+- The notices bundled into the Android artifact name splat-transform (PlayCanvas), whose collision voxel passes `splat-core`'s collider builder ports, and carry its MIT licence.
+
+### Changed
+
+- A version bump is the release trigger.
+  Landing a change to the Maven coordinate in `packages/splatkit-android/build.gradle.kts` on `main` publishes to Maven Central, tags the commit and opens the GitHub release; nobody cuts a tag by hand.
+  `docs/RELEASING.md` describes all three artifacts and the order they have to be cut in.
+- Android releases are no longer marked prerelease.
+  Every pre-1.0 release is an alpha, and marking them all prerelease left the releases page with no Latest at all.
+
+### Fixed
+
+- The copyright holder in `LICENSE` and in the notices bundled into the Android artifact reads Juan Ignacio Andrade.
+- `mirror.yml` names a missing `MIRROR_TOKEN` instead of failing four steps later with an opaque git authentication error, and waits for the test workflows on the same commit before it mirrors.
+- The release gate fails fast when it cannot read workflow runs, instead of treating a run it could not read as a pass.
+- `scripts/package-ios.sh` is executable, so the invocation `docs/RELEASING.md` documents runs.
+
+### Removed
+
+- `SplatSurfaceView.motionToggleEnabled` and the double tap that toggled the gyroscope.
+  A host that wants the gesture recognises it on its own view and calls `setMotionEnabled`, which keeps the touches the SDK claims down to the single drag it documents.
+
+## [0.1.0-alpha08] - 2026-09-18
+
+### Added
+
+- `RenderPolicySupport::rasterMask` in the shared engine, listing the raster strategies a backend builds.
+- `RenderPolicy::lodSplatLimit` in the shared engine: a live cap on selected hierarchy splats, 0 for the loaded capacity.
+- `buildCollider` in splat-core makes a walk-mode collider from a world's splats, a port of PlayCanvas splat-transform's collision voxel passes, with `encodeGlb` and `tools/splat_collider` to write it as a `.glb`.
+- Shared engine stats count frames the display showed when a renderer reports presentation times, with a 95th percentile frame time, a 1% low and dropped frames; Metal reports them, Vulkan still counts submitted frames.
+- `SplatSurfaceView.walk`, `setCharacter`, `character` and the `CharacterSettings` type, so the host drives walking and shapes the walker.
+- `SplatSurfaceView.cameraPoseIntervalMillis` and `cameraPoseListener`, which report where the camera ended up at most that often and only while it moves.
+- `SplatSurfaceView.touchLookEnabled` and `motionToggleEnabled`, for a host that draws its own look control.
+
+### Changed
+
+- Walk mode refuses steps onto a floor more than 0.35 m higher, looking 0.25 m ahead, so it climbs stairs and steps over door tracks but no longer climbs counters, chairs or tables whose top the hip probe passes over, and slides along them when walked into at an angle.
+- The view handles one drag to look and nothing else; walking comes from the host.
+  A second finger no longer walks, so the host's own controls keep every touch the look drag does not.
+- The [React Native example](apps/react-native/README.md) replaces the React Native dev app: a template React Native 0.87.1 app that installs `@splatkit/react-native` from npm and runs on Android and iOS.
+
+### Removed
+
+- `SplatSurfaceView.walkSensitivity`, which configured the two-finger walk gesture that is gone.
+
+## [0.1.0-alpha07] - 2026-09-16
+
+### Added
+
+- `SplatSurfaceView.applyRenderPolicy`, `renderPolicy` and `deviceCapabilities`, with the `RenderPolicy`, `RenderPolicyResolution` and `DeviceCapabilities` types.
+  The engine re-validates each request on the render thread; Vulkan applies `sortDepth` and `subpixelThreshold`, and every other field falls back with a warning.
+  An invalid request or a preparation failure keeps the previous policy.
+- `SplatSurfaceView.Listener.onWorldFrameReady`, fired once when the first world frame's Vulkan fence completes.
+- `loadWorld(file, maxShDegree, splatBudget, residencyBudget)`, which applies load options on the render thread before that file's decode.
+- 16 KB page alignment for the native library; CI checks every packaged shared library and APK ZIP alignment with `scripts/check_android_alignment.py`.
+- Shared engine: `resolveRenderPolicy`, `SplatEngine::setRenderPolicy` and a capability query on `SplatRenderer`.
+- Benchmarks log 30-second windows and final p99 frame and GPU times; `TimingSummary` reports p99.
+- `scripts/benchmark_report.py` for sustained-run reports and `scripts/compare_captures.py` for matched-image comparisons.
+- The React Native dev app, which mounts the Fabric package on Android.
+
+### Changed
+
+- `readStats()` drawn counts and GPU times describe the newest frame the GPU finished, also while nothing redraws, and are current when `onWorldFrameReady` fires.
+- Benchmarks reject durations outside `(0, 3600]` seconds and treat a zero GPU time as unavailable, not as a free frame.
+
+### Removed
+
+- The `SPLATKIT_VULKAN_SORT_BITS` environment variable; set `sortDepth` through `applyRenderPolicy` instead.
+
+### Fixed
+
+- The Vulkan frame-compute GPU test ran its 16-bit pass at 32 bits; it now selects the depth through the policy and asserts it.
+
+## [0.1.0-alpha06] - 2026-09-12
+
+### Fixed
+
+- Adreno 640 duplicate-key corruption in the GPU radix sort of alpha05.
+
+### Changed
+
+- LOD visibility skips empty workgroups: house 2M on a Mi 9 went from 24.0 to 41.4 FPS with unchanged quality settings.
+
+## [0.1.0-alpha05] - 2026-09-12
+
+### Added
+
+- Native GPU pipeline: LOD selection, visibility and compaction, stable radix sort and indirect drawing, behind runtime capability and memory gates.
+- Offline `.lodsplat` worlds and live loaded and drawn counts.
+
+### Known issues
+
+- Adreno GPUs can corrupt the radix order; use alpha06.
+
+## [0.1.0-alpha04] - 2026-09-09
+
+### Added
+
+- The harmonics degree is chosen per frame, so a preset switch never reloads the world.
+- The cull margin scales with the frame time.
+- Engine modules, `clang-format` and `clang-tidy` on every pull request, and the `ply2spz` converter.
+
+### Fixed
+
+- Truncated or corrupt files and failed swapchain rebuilds report through the listener instead of crashing.
+
+## [0.1.0-alpha03] - 2026-09-07
+
+### Added
+
+- Quality presets `LOW` to `ULTRA`, render scale up to 2, the cull margin, `cameraPose` and file-mapped world and collider loading.
+- Blending in the encoded colour space by default, and an opt-in level of detail tree.
+
+## [0.1.0-alpha02] - 2026-09-04
+
+### Added
+
+- First Maven Central publication of the Vulkan SDK.
+
+[0.1.0-beta.1]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-beta.1
+[0.1.0-alpha09]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-alpha09
+[0.1.0-alpha08]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-alpha08
+[0.1.0-alpha07]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-alpha07
+[0.1.0-alpha06]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-alpha06
+[0.1.0-alpha05]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-alpha05
+[0.1.0-alpha04]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-alpha04
+[0.1.0-alpha03]: https://github.com/Xget7/splatkit/tree/v0.1.0-alpha03
+[0.1.0-alpha02]: https://github.com/Xget7/splatkit/tree/v0.1.0-alpha02
+
+[0.1.0-beta.3]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-beta.3
+[0.1.0-beta.2]: https://github.com/Xget7/splatkit/releases/tag/v0.1.0-beta.2

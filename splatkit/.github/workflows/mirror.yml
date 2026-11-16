@@ -1,0 +1,99 @@
+name: mirror
+
+# The public iOS and React Native repositories are generated from this one, so a merge to main
+# rebuilds them and pushes the result. Their own publish workflows take it from there: bumping a
+# package version in a pull request here is the whole release ritual.
+#
+# MIRROR_TOKEN is a fine-grained personal access token with Contents and Workflows write access to
+# both mirrors; the built-in GITHUB_TOKEN cannot reach another repository.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Back-to-back pushes would otherwise race: a run that clones a mirror after a newer run pushed
+# it would overwrite it with an older tree. Runs go one at a time and a newer push replaces the
+# queued one, but push events can reach the queue out of order, so the surviving run may belong
+# to an older commit. Each run therefore exports the tip of main, not the commit that queued it.
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            repository: Xget7/splatkit-ios
+          - platform: react-native
+            repository: Xget7/react-native-splatkit
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Record the commit being mirrored
+        run: echo "MIRROR_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # The test workflows run alongside this one on the same push; do not mirror a commit
+      # the tests have not passed. lint.yml is style only and neither mirror ships it or its
+      # tooling, so a formatting finding must not keep tested source from the mirrors.
+      - name: Wait for the tests on the mirrored commit
+        run: scripts/wait-for-checks.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAIT_WORKFLOWS: android.yml core.yml engine.yml ios.yml rn-contract.yml
+          WAIT_SHA: ${{ env.MIRROR_SHA }}
+
+      # Without this the failure is an opaque git authentication error four steps later.
+      - name: Check the mirror token exists
+        run: |
+          if [ -z "${MIRROR_TOKEN}" ]; then
+            echo "::error::MIRROR_TOKEN is not set. Create a fine-grained token with Contents" \
+                 "and Workflows write access to ${REPOSITORY} and add it as a repository secret."
+            exit 1
+          fi
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          REPOSITORY: ${{ matrix.repository }}
+
+      # The export refuses binaries, oversized files and anything matching a secret pattern, so a
+      # bad file fails here rather than reaching a public repository.
+      - id: export
+        run: |
+          directory=$(python3 scripts/export-ios-source.py --platform "$PLATFORM" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['directory'])")
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - name: Push the generated tree
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${MIRROR_TOKEN}@github.com/${REPOSITORY}.git" mirror
+          # Export and clone can produce equal-sized files with the same timestamp.
+          # Compare bytes so a changed manifest or source file is never skipped.
+          rsync -a --checksum --delete --exclude .git "${DIRECTORY}/" mirror/
+          cd mirror
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No change to mirror."
+            exit 0
+          fi
+          git commit -m "$(git -C "$GITHUB_WORKSPACE" log -1 --format=%s "$MIRROR_SHA")" \
+            -m "Generated from ${GITHUB_REPOSITORY}@${MIRROR_SHA}."
+          git push
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          REPOSITORY: ${{ matrix.repository }}
+          DIRECTORY: ${{ steps.export.outputs.directory }}

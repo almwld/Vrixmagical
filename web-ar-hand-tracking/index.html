@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Content-Security-Policy (defensa en profundidad). Acota de dónde se puede
+      cargar y ejecutar código en una app cuyo pitch es "el video nunca sale del
+      dispositivo": ningún frame de cámara se envía a la red (sólo se descargan
+      assets estáticos de MediaPipe). Orígenes permitidos, justificados:
+        - script-src 'self': sólo el bundle propio. Sin 'unsafe-inline' (no hay
+          ningún <script> inline) → la CSP sí mitiga XSS de scripts. Más
+          'wasm-unsafe-eval' (WASM de MediaPipe) + blob: (el worker carga el
+          bundle CJS de MediaPipe desde un Blob URL mismo-origen; ver
+          hand-landmarker.worker.ts).
+        - worker-src blob:: el Worker clásico se instancia desde un Blob/URL local.
+        - connect-src: descarga del bundle CJS (jsDelivr), del WASM (jsDelivr) y del
+          modelo .task (storage.googleapis.com). Sin telemetría: NO se carga
+          ningún analytics (coherente con el pitch privacy-first).
+        - img-src/media-src blob: data:: el <video> de la cámara y la "foto" PNG.
+      Nota SRI: el bundle de MediaPipe se ejecuta vía importScripts de un Blob,
+      donde el atributo integrity no aplica. Mitigación: el pin de versión exacto
+      en config.ts + esta CSP que restringe orígenes. Para SRI real, self-hostear
+      los assets de MediaPipe (ruta ya documentada en config.ts).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src 'self' blob: https://cdn.jsdelivr.net https://storage.googleapis.com; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'"
+    />
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Realidad aumentada en el navegador: detección de mano con MediaPipe (en Web Worker) y figuras 3D con Three.js."
+    />
+    <title>AR Hand Figures</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

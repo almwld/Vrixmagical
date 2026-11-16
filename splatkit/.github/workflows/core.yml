@@ -1,0 +1,123 @@
+name: splat-core
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded PR checks; preserve each main commit for the release and mirror gates.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Pull requests run only the jobs their files reach (.github/ci-filters.yml); main runs all.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      splat-core: ${{ steps.changes.outputs.splat-core }}
+      prepare-world: ${{ steps.changes.outputs.prepare-world }}
+      spz-interop: ${{ steps.changes.outputs.spz-interop }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - id: changes
+        uses: ./.github/actions/changes
+
+  test:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.splat-core == 'true') }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: ["", "thread", "address"]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: >
+          cmake -S packages/splat-core -B build/splat-core
+          -DCMAKE_BUILD_TYPE=${{ matrix.sanitize == '' && 'Release' || 'Debug' }}
+          -DSPLAT_CORE_SANITIZE=${{ matrix.sanitize }}
+      - name: Build
+        run: cmake --build build/splat-core --parallel
+      - name: Test
+        run: ctest --test-dir build/splat-core --output-on-failure
+
+  # The README sends every PLY through scripts/prepare-world.sh, so run it the way a user
+  # would: from a clean checkout, on a closed room of splats, with every output requested.
+  prepare-world:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.prepare-world == 'true') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare a room from a PLY
+        run: |
+          python3 scripts/tests/make_room_ply.py "$RUNNER_TEMP/room.ply"
+          scripts/prepare-world.sh "$RUNNER_TEMP/room.ply" "$RUNNER_TEMP/room" --collider --lod --sh 0
+      - name: Check the outputs
+        run: |
+          test -s "$RUNNER_TEMP/room/room.spz"
+          test -s "$RUNNER_TEMP/room/room.lodsplat"
+          test "$(head -c 4 "$RUNNER_TEMP/room/room.collider.glb")" = glTF
+      - name: Prepare a version 4 room
+        run: |
+          scripts/prepare-world.sh "$RUNNER_TEMP/room.ply" "$RUNNER_TEMP/room-v4" --spz-version 4 --collider --lod --sh 0
+          test "$(head -c 4 "$RUNNER_TEMP/room-v4/room.spz")" = NGSP
+          test -s "$RUNNER_TEMP/room-v4/room.lodsplat"
+          test "$(head -c 4 "$RUNNER_TEMP/room-v4/room.collider.glb")" = glTF
+      - name: Prepare an SPZ that declares another frame
+        run: |
+          build/world-tools/tools/splat-convert "$RUNNER_TEMP/room-v4/room.spz" "$RUNNER_TEMP/room-rdf.spz" --spz-version 4 --target-frame rdf
+          scripts/prepare-world.sh "$RUNNER_TEMP/room-rdf.spz" "$RUNNER_TEMP/room-declared" --spz-version 4 --collider --lod --sh 0
+          test -s "$RUNNER_TEMP/room-declared/room-rdf.lodsplat"
+          cmp "$RUNNER_TEMP/room-v4/room.lodsplat" "$RUNNER_TEMP/room-declared/room-rdf.lodsplat"
+          cmp "$RUNNER_TEMP/room-v4/room.collider.glb" "$RUNNER_TEMP/room-declared/room-rdf.collider.glb"
+
+  spz-interop:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.spz-interop == 'true') }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [checkout, ios-export]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select the source tree
+        id: source
+        run: |
+          directory="$GITHUB_WORKSPACE"
+          if [[ "${{ matrix.tree }}" == ios-export ]]; then
+            # setup-node hashes cache inputs only within GITHUB_WORKSPACE.
+            mkdir -p "$GITHUB_WORKSPACE/build/mirror-check"
+            directory=$(TMPDIR="$GITHUB_WORKSPACE/build/mirror-check" python3 scripts/export-ios-source.py --platform ios \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['directory'])")
+          fi
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ steps.source.outputs.directory }}/scripts/spz-interop/package-lock.json
+      - name: Build the converter and SDK decoder checks
+        working-directory: ${{ steps.source.outputs.directory }}
+        run: |
+          cmake -S packages/splat-core -B build/splat-core -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/splat-core --parallel --target splat_core_tests
+      - name: Install pinned interoperability tools
+        working-directory: ${{ steps.source.outputs.directory }}
+        run: npm ci --prefix scripts/spz-interop --ignore-scripts --no-audit --no-fund
+      - name: Check PlayCanvas parsing and SplatTransform interchange
+        working-directory: ${{ steps.source.outputs.directory }}
+        run: >
+          node scripts/spz-interop/test.mjs
+          build/splat-core/tools/splat-convert
+          build/splat-core/tests/splat_core_tests
+          build/spz-interop
