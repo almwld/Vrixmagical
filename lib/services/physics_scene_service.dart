@@ -209,6 +209,27 @@ class PhysicsSceneService {
     );
   }
 
+  void addKinematicBox({
+    required String id,
+    required Matrix4 worldTransform,
+    required Vector3 halfExtents,
+    double friction = 0.6,
+  }) {
+    _addBody(
+      id: id,
+      shape: _boxSpec(halfExtents),
+      motionType: jolt.JJ_MOTION_KINEMATIC,
+      worldTransform: worldTransform,
+      friction: friction,
+      restitution: 0,
+      gravityFactor: 0,
+      mass: 0,
+      layer: 1,
+      sensor: false,
+      continuous: false,
+    );
+  }
+
   void addDynamicBox({
     required String id,
     required Matrix4 worldTransform,
@@ -673,40 +694,49 @@ class PhysicsSceneService {
     });
   }
 
-  void setBodyWorldTransform(String id, Matrix4 transform) {
+  void setBodyWorldTransform(
+    String id,
+    Matrix4 transform, {
+    bool resetVelocity = true,
+  }) {
     _ensureAvailable();
     final record = _bodies[id];
     if (record == null) return;
-    if (_joints.values.any((joint) => joint.bodyA == id || joint.bodyB == id)) {
-      throw StateError('Cannot teleport a body while it is connected to a joint.');
-    }
-    _toPose(transform);
-    final previousHandle = record.handle;
-    final updated = Matrix4.copy(transform);
-    final replacement = _BodyRecord(
-      id: record.id,
-      shape: record.shape,
-      motionType: record.motionType,
-      transform: updated,
-      friction: record.friction,
-      restitution: record.restitution,
-      gravityFactor: record.gravityFactor,
-      mass: record.mass,
-      layer: record.layer,
-      sensor: record.sensor,
-      continuous: record.continuous,
-      linearDamping: record.linearDamping,
-      angularDamping: record.angularDamping,
-      linearVelocity: Vector3.zero(),
-    );
-    final nextHandle = _createNativeBody(replacement);
-    jolt.jj_body_destroy(previousHandle);
-    _bodyIdsByHandle.remove(previousHandle);
+    final pose = _toPose(transform);
+    using((arena) {
+      final position = arena<jolt.JPH_Vec3>();
+      final rotation = arena<jolt.JPH_Quat>();
+      _writeVector(position, Vector3(
+        pose.position[0],
+        pose.position[1],
+        pose.position[2],
+      ));
+      rotation.ref
+        ..x = pose.rotation[0]
+        ..y = pose.rotation[1]
+        ..z = pose.rotation[2]
+        ..w = pose.rotation[3];
+      final bodyInterface = _getBodyInterface();
+      jolt.JPH_BodyInterface_SetPositionAndRotation(
+        bodyInterface,
+        record.handle,
+        position,
+        rotation,
+        jolt.JPH_Activation_Activate,
+      );
+      if (resetVelocity) {
+        final zero = arena<jolt.JPH_Vec3>();
+        zero.ref..x = 0..y = 0..z = 0;
+        jolt.JPH_BodyInterface_SetLinearVelocity(
+          bodyInterface,
+          record.handle,
+          zero,
+        );
+      }
+    });
     record
-      ..handle = nextHandle
-      ..transform = updated
+      ..transform = Matrix4.copy(transform)
       ..linearVelocity = Vector3.zero();
-    _bodyIdsByHandle[nextHandle] = id;
   }
 
   void setLinearVelocity(String id, Vector3 velocity) {
@@ -716,30 +746,118 @@ class PhysicsSceneService {
     }
     final record = _bodies[id];
     if (record == null) return;
-    final previous = record.handle;
-    final replacement = _BodyRecord(
-      id: record.id,
-      shape: record.shape,
-      motionType: record.motionType,
-      transform: Matrix4.copy(record.transform),
-      friction: record.friction,
-      restitution: record.restitution,
-      gravityFactor: record.gravityFactor,
-      mass: record.mass,
-      layer: record.layer,
-      sensor: record.sensor,
-      continuous: record.continuous,
-      linearDamping: record.linearDamping,
-      angularDamping: record.angularDamping,
-      linearVelocity: Vector3.copy(velocity),
+    using((arena) {
+      final value = arena<jolt.JPH_Vec3>();
+      _writeVector(value, velocity);
+      jolt.JPH_BodyInterface_SetLinearVelocity(
+        _getBodyInterface(),
+        record.handle,
+        value,
+      );
+    });
+    record.linearVelocity = Vector3.copy(velocity);
+  }
+
+  void applyImpulse(String id, Vector3 impulse) {
+    _ensureAvailable();
+    if (!_isFiniteVector(impulse)) {
+      throw ArgumentError.value(impulse, 'impulse');
+    }
+    final record = _bodies[id];
+    if (record == null) return;
+    using((arena) {
+      final value = arena<jolt.JPH_Vec3>();
+      _writeVector(value, impulse);
+      jolt.JPH_BodyInterface_AddImpulse(
+        _getBodyInterface(),
+        record.handle,
+        value,
+      );
+    });
+  }
+
+  void addForce(String id, Vector3 force) {
+    _ensureAvailable();
+    if (!_isFiniteVector(force)) {
+      throw ArgumentError.value(force, 'force');
+    }
+    final record = _bodies[id];
+    if (record == null) return;
+    using((arena) {
+      final value = arena<jolt.JPH_Vec3>();
+      _writeVector(value, force);
+      jolt.JPH_BodyInterface_AddForce(
+        _getBodyInterface(),
+        record.handle,
+        value,
+      );
+    });
+  }
+
+  void setBodyMotionType(String id, {required bool kinematic}) {
+    _ensureAvailable();
+    final record = _bodies[id];
+    if (record == null) return;
+    final motionType = kinematic
+        ? jolt.JJ_MOTION_KINEMATIC
+        : jolt.JJ_MOTION_DYNAMIC;
+    jolt.JPH_BodyInterface_SetMotionType(
+      _getBodyInterface(),
+      record.handle,
+      motionType,
+      jolt.JPH_Activation_Activate,
     );
-    final next = _createNativeBody(replacement);
-    jolt.jj_body_destroy(previous);
-    _bodyIdsByHandle.remove(previous);
-    record
-      ..handle = next
-      ..linearVelocity = Vector3.copy(velocity);
-    _bodyIdsByHandle[next] = id;
+  }
+
+  void moveKinematic(
+    String id,
+    Matrix4 targetTransform, {
+    required double deltaSeconds,
+  }) {
+    _ensureAvailable();
+    if (!deltaSeconds.isFinite || deltaSeconds <= 0) {
+      throw ArgumentError.value(deltaSeconds, 'deltaSeconds');
+    }
+    final record = _bodies[id];
+    if (record == null) return;
+    if (record.motionType != jolt.JJ_MOTION_KINEMATIC) {
+      throw StateError('Body $id is not kinematic.');
+    }
+    final pose = _toPose(targetTransform);
+    using((arena) {
+      final position = arena<jolt.JPH_Vec3>();
+      final rotation = arena<jolt.JPH_Quat>();
+      _writeVector(position, Vector3(
+        pose.position[0],
+        pose.position[1],
+        pose.position[2],
+      ));
+      rotation.ref
+        ..x = pose.rotation[0]
+        ..y = pose.rotation[1]
+        ..z = pose.rotation[2]
+        ..w = pose.rotation[3];
+      jolt.JPH_BodyInterface_MoveKinematic(
+        _getBodyInterface(),
+        record.handle,
+        position,
+        rotation,
+        deltaSeconds,
+      );
+    });
+    record.transform = Matrix4.copy(targetTransform);
+  }
+
+  Pointer<jolt.JPH_BodyInterface> _getBodyInterface() {
+    final system = jolt.jj_world_joltc(_world);
+    if (system.address == 0) {
+      throw StateError('Jolt physics system is not available.');
+    }
+    final bodyInterface = jolt.JPH_PhysicsSystem_GetBodyInterface(system);
+    if (bodyInterface.address == 0) {
+      throw StateError('Jolt body interface is not available.');
+    }
+    return bodyInterface;
   }
 
   String createJoint({
