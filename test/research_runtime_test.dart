@@ -44,6 +44,38 @@ void main() {
       expect(physics.advance(1), 5);
     });
 
+    test('rejects non-finite body state, impulses and out-of-range friction', () {
+      final physics = FixedStepPhysics();
+      expect(
+        () => physics.addBody(PhysicsBody(
+          objectId: 'nan-position',
+          position: const Vec3(double.nan, 0, 0),
+        )),
+        throwsArgumentError,
+      );
+      expect(
+        () => physics.addBody(PhysicsBody(
+          objectId: 'infinite-velocity',
+          position: const Vec3.zero(),
+          velocity: const Vec3(double.infinity, 0, 0),
+        )),
+        throwsArgumentError,
+      );
+      physics.addBody(PhysicsBody(objectId: 'valid', position: const Vec3.zero()));
+      expect(
+        () => physics.applyImpulse('valid', const Vec3(0, double.nan, 0)),
+        throwsArgumentError,
+      );
+      expect(
+        () => physics.addCollider(const Collider(
+          objectId: 'valid',
+          halfExtents: Vec3.one(),
+          friction: 1.01,
+        )),
+        throwsArgumentError,
+      );
+    });
+
     test('rejects invalid bodies and time deltas', () {
       final physics = FixedStepPhysics();
       expect(
@@ -51,6 +83,89 @@ void main() {
         throwsArgumentError,
       );
       expect(() => physics.advance(-1), throwsArgumentError);
+    });
+  });
+
+  group('AABB collision solver', () {
+    test('keeps a falling body above a static floor', () {
+      final physics = FixedStepPhysics();
+      physics.addBody(PhysicsBody(objectId: 'floor', position: const Vec3(0, -.5, 0)));
+      physics.addCollider(const Collider(
+        objectId: 'floor',
+        halfExtents: Vec3(5, .5, 5),
+        isStatic: true,
+        restitution: 0,
+      ));
+      physics.addBody(PhysicsBody(objectId: 'box', position: const Vec3(0, 1, 0)));
+      physics.addCollider(const Collider(
+        objectId: 'box',
+        halfExtents: Vec3(.5, .5, .5),
+        restitution: 0,
+      ));
+
+      for (var i = 0; i < 180; i++) {
+        physics.advance(1 / 60);
+      }
+      final box = physics.bodies.firstWhere((body) => body.objectId == 'box');
+      expect(box.position.y, greaterThanOrEqualTo(.49));
+      expect(box.velocity.y.abs(), lessThan(.05));
+    });
+
+    test('resolves a head-on collision between equal dynamic bodies', () {
+      final physics = FixedStepPhysics(gravity: const Vec3.zero(), solverIterations: 2);
+      physics.addBody(PhysicsBody(
+        objectId: 'left',
+        position: const Vec3(-.6, 0, 0),
+        velocity: const Vec3(1, 0, 0),
+      ));
+      physics.addBody(PhysicsBody(
+        objectId: 'right',
+        position: const Vec3(.6, 0, 0),
+        velocity: const Vec3(-1, 0, 0),
+      ));
+      physics.addCollider(const Collider(
+        objectId: 'left',
+        halfExtents: Vec3(.5, .5, .5),
+        restitution: 1,
+        friction: 0,
+      ));
+      physics.addCollider(const Collider(
+        objectId: 'right',
+        halfExtents: Vec3(.5, .5, .5),
+        restitution: 1,
+        friction: 0,
+      ));
+
+      physics.advance(1 / 60);
+      final left = physics.bodies.firstWhere((body) => body.objectId == 'left');
+      final right = physics.bodies.firstWhere((body) => body.objectId == 'right');
+      expect(left.velocity.x, lessThan(0));
+      expect(right.velocity.x, greaterThan(0));
+    });
+
+    test('rejects invalid or orphaned colliders and removes them with bodies', () {
+      final physics = FixedStepPhysics();
+      expect(
+        () => physics.addCollider(const Collider(
+          objectId: 'missing',
+          halfExtents: Vec3.one(),
+        )),
+        throwsStateError,
+      );
+      physics.addBody(PhysicsBody(objectId: 'box', position: const Vec3.zero()));
+      expect(
+        () => physics.addCollider(const Collider(
+          objectId: 'box',
+          halfExtents: Vec3(0, 1, 1),
+        )),
+        throwsArgumentError,
+      );
+      physics.addCollider(const Collider(
+        objectId: 'box',
+        halfExtents: Vec3.one(),
+      ));
+      physics.removeBody('box');
+      expect(physics.colliders, isEmpty);
     });
   });
 
@@ -77,8 +192,8 @@ void main() {
 
   test('scene registry enforces identity and consequential-action confirmation', () {
     final registry = SceneObjectRegistry();
-    registry.register(const SceneObject(id: 'lamp_1', position: Vec3.zero()));
-    expect(() => registry.register(const SceneObject(id: 'lamp_1', position: Vec3.zero())), throwsStateError);
+    registry.register(const SceneObject(id: 'lamp_1', position: const Vec3.zero()));
+    expect(() => registry.register(const SceneObject(id: 'lamp_1', position: const Vec3.zero())), throwsStateError);
     expect(registry.apply(const SceneCommand(type: SceneCommandType.hide, objectId: 'lamp_1')), isTrue);
     expect(registry['lamp_1']!.visible, isFalse);
     const delete = SceneCommand(type: SceneCommandType.delete, objectId: 'lamp_1', requiresConfirmation: true);
