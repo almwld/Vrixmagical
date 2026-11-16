@@ -593,10 +593,10 @@ class PhysicsSceneService {
     required String bodyA,
     String? bodyB,
     required PhysicsJointKind kind,
-    Vector3 pointA = const Vector3.zero(),
-    Vector3 pointB = const Vector3.zero(),
-    Vector3 axis = const Vector3(0, 1, 0),
-    Vector3 normal = const Vector3(1, 0, 0),
+    Vector3? pointA,
+    Vector3? pointB,
+    Vector3? axis,
+    Vector3? normal,
     double? lowerLimit,
     double? upperLimit,
     double maxFriction = 0,
@@ -611,15 +611,19 @@ class PhysicsSceneService {
     if (_joints.containsKey(id)) throw StateError('Joint already exists: $id');
     final a = _bodies[bodyA];
     final b = bodyB == null ? null : _bodies[bodyB];
+    final anchorA = pointA ?? Vector3.zero();
+    final anchorB = pointB ?? Vector3.zero();
+    final jointAxis = axis ?? Vector3(0, 1, 0);
+    final jointNormal = normal ?? Vector3(1, 0, 0);
     if (a == null || (bodyB != null && b == null)) {
       throw ArgumentError('Both joint bodies must exist in this world.');
     }
-    if (!_isFiniteVector(pointA) ||
-        !_isFiniteVector(pointB) ||
-        !_isFiniteVector(axis) ||
-        !_isFiniteVector(normal) ||
-        axis.length2 < 1e-8 ||
-        normal.length2 < 1e-8) {
+    if (!_isFiniteVector(anchorA) ||
+        !_isFiniteVector(anchorB) ||
+        !_isFiniteVector(jointAxis) ||
+        !_isFiniteVector(jointNormal) ||
+        jointAxis.length2 < 1e-8 ||
+        jointNormal.length2 < 1e-8) {
       throw ArgumentError('Joint anchors and axes must be finite and non-zero.');
     }
     if (!maxFriction.isFinite ||
@@ -654,10 +658,16 @@ class PhysicsSceneService {
         ..motorTarget = motorTarget
         ..springFrequency = springFrequency
         ..springDamping = springDamping;
-      _writeVector(settings.ref.pointA, pointA);
-      _writeVector(settings.ref.pointB, pointB);
-      final normalizedAxis = Vector3.copy(axis)..normalize();
-      final normalizedNormal = Vector3.copy(normal)..normalize();
+      _writeVector(settings.ref.pointA, anchorA);
+      _writeVector(settings.ref.pointB, anchorB);
+      final normalizedAxis = Vector3.copy(jointAxis)..normalize();
+      final normalizedNormal = Vector3.copy(jointNormal)..normalize();
+      if (normalizedAxis.dot(normalizedNormal).abs() > 0.999) {
+        throw ArgumentError('Joint axis and normal must not be parallel.');
+      }
+      normalizedNormal
+        ..sub(normalizedAxis * normalizedAxis.dot(normalizedNormal))
+        ..normalize();
       _writeVector(settings.ref.axis, normalizedAxis);
       _writeVector(settings.ref.normal, normalizedNormal);
       return jolt.jj_joint_create(_world, a.handle, b?.handle ?? 0, settings);
