@@ -6,18 +6,19 @@ VirxMagical is an Android-first Flutter application for interactive digital repr
 
 - Arabic-first Flutter app shell and navigation.
 - **AR scene:** native ARCore/ARKit session through `flutter_reality`, horizontal/vertical plane detection, tap hit-testing, anchors, GLB placement, drag/rotate and removal.
-- **3D physics:** Jolt-backed rigid-body world through the isolated physics entrypoint of `stage_3d`; static AR surface colliders, dynamic digital props, fixed-step simulation, transform synchronization, interaction hand-off and explicit native resource disposal.
+- **3D physics:** standalone Jolt Physics 5.6 native runtime through `just_jolt`; static/dynamic rigid bodies, box/sphere/capsule colliders, continuous collision mode, collision layers, sensors, buffered contact events, ray queries and six joint families.
+- **Physics-to-AR bridge:** fixed-step Jolt simulation, batch active-body transform reads, world-to-anchor-local pose conversion, manual interaction hand-off and explicit native teardown.
 - **Hand mirror:** camera preview plus Google's MediaPipe Hand Landmarker in live-stream mode. A pinch grabs and moves a digital overlay; the physical source object is never modified.
 - **Scene analysis:** on-device MediaPipe Object Detector and Image Segmenter on a captured frame.
-- **Automated tests:** scene runtime, physics lifecycle/input validation and existing hand-interaction behavior.
+- **Automated tests:** physics lifecycle/input validation, rigid-body contact/raycast behavior and existing hand-interaction behavior.
 
-## Physics architecture and current verification boundary
+## Physics architecture and production verification boundary
 
-The physics service is deliberately separate from the AR renderer. Jolt owns rigid-body simulation; `flutter_reality`/ARCore owns camera tracking, anchors and visible GLB nodes. The bridge converts world-space physics poses into anchor-local render transforms and pauses transform writes while a user is dragging or rotating a node.
+Jolt owns rigid-body simulation; `flutter_reality`/ARCore owns camera tracking, anchors and visible GLB nodes. The native engine is compiled from Jolt Physics 5.6 through the standalone `just_jolt` FFI package. This avoids coupling the physics runtime to a second renderer or a Filament PlatformView.
 
-The current AR placement path creates a static box collider for the tapped surface and a dynamic box collider for the placed digital prop. The collider dimensions are explicit approximations for the sample Duck asset, not automatically generated mesh colliders. The Jolt integration is sourced through `stage_3d`'s physics-only entrypoint; the package currently labels its overall project as experimental beta. Do not interpret a successful Flutter compile as proof of hardware readiness.
+The app adapter exposes static/dynamic bodies, box/sphere/capsule colliders, sensors, collision-layer masks, contact/sensor/activation events, raycasts, continuous collision mode, and fixed/point/hinge/slider/distance/six-DOF joints. AR objects are synchronized using batched reads of awake bodies and bodies that just went to sleep. Drag/rotate hand-off teleports an unjointed body and resets its velocity; a joint-connected body is protected from this operation.
 
-**Not yet accepted as production complete:** Android native Jolt runtime validation, ARCore coordinate/scale calibration on physical devices, stress/performance profiling, collision-shape fitting for imported GLB assets, and lifecycle soak tests. Soft-body simulation, fluid simulation and AR depth/occlusion are separate capabilities and are not claimed as implemented.
+The current AR placement sample uses a finite static box for the tapped surface and a manually approximated dynamic box for the sample Duck asset. Imported GLB collider metadata/automatic convex decomposition, moving tracked-plane updates, and anchor-loss recovery are not yet implemented. Native Android runtime startup, physical-device AR calibration, stress/performance profiling, and lifecycle soak tests remain required before production certification. Soft-body simulation, fluids, AR depth/occlusion and scene reconstruction are separate capabilities and are not claimed as implemented.
 
 ## Camera ownership
 
@@ -29,8 +30,8 @@ The AR scene and hand-mirror experience are separate modes. ARCore/ARKit owns th
 |---|---|---|
 | Flutter | App UI, state and navigation | Integrated |
 | ARCore / ARKit | World tracking, planes, anchors and hit tests | Integrated through flutter_reality; physical-device validation pending |
-| Jolt Physics | 3D rigid bodies, collision detection and response | Wired through Stage 3D's physics API; Android runtime validation pending |
-| Physics-to-AR bridge | Sync body transforms to anchor-local AR nodes | Implemented for placed sample props; device calibration pending |
+| Jolt Physics 5.6 | 3D rigid bodies, collision detection, CCD, sleeping, sensors, events, queries and joints | Native FFI adapter integrated; Android build/device verification pending |
+| Physics-to-AR bridge | Sync active Jolt poses to anchor-local AR nodes | Implemented for placed sample props; device calibration pending |
 | MediaPipe Hand Landmarker | 21 hand landmarks and pinch tracking | Integrated live-stream path; device validation pending |
 | MediaPipe Object Detector | Object labels and bounding boxes | Integrated still-frame analysis |
 | MediaPipe Image Segmenter | Per-pixel category mask | Integrated still-frame analysis |
@@ -40,6 +41,8 @@ The AR scene and hand-mirror experience are separate modes. ARCore/ARKit owns th
 | NeRF | Alternative scene reconstruction pipeline | Research reference only; not integrated |
 | Soft bodies / fluids | Deformable and fluid simulation | Not yet integrated |
 | Voice / vision-language model | Natural-language scene commands | Typed allow-listed command contract only; speech runtime not integrated |
+
+Jolt is built from source by the `just_jolt` native build hook. The app explicitly enables that hook in its own `pubspec.yaml`; without it, the package intentionally ships no native physics library. The bundled Jolt and joltc licenses are included by the package. Verify the resulting Android APK contains the native Jolt asset for each shipped ABI before release.
 
 SplatKit Android is pinned to the published Maven Central artifact `io.github.xget7:splatkit-android:0.1.0-beta.3`. It requires Android 10/API 29+, arm64-v8a and Vulkan 1.1. Import a prepared `.spz` or `.lodsplat` file from the scene viewer. PLY reconstruction/preprocessing is an offline workflow; convert PLY with the SplatKit `prepare-world.sh` tooling before importing. Splat clouds are visual geometry and are not automatically collision-ready meshes.
 
@@ -63,7 +66,7 @@ The initial Flutter commit did not include generated Android platform files. Cre
 
     bash tool/bootstrap_android.sh
 
-This generates the Flutter Android host and configures compileSdk 36, minSdk 29, arm64-v8a and the native SplatKit Vulkan dependency. Build and test on a physical ARCore-certified Android phone with Google Play Services for AR installed. The Gaussian Splat viewer additionally requires Vulkan 1.1. Emulators can run unit tests but cannot validate camera tracking, AR, native Jolt or Vulkan rendering.
+This generates the Flutter Android host and configures compileSdk 36, minSdk 29, arm64-v8a and the native SplatKit Vulkan dependency. Build and test on a physical ARCore-certified Android phone with Google Play Services for AR installed. The Gaussian Splat viewer additionally requires Vulkan 1.1. Jolt's native build hook compiles the engine for the selected Android ABI; validate cold start, resume and native library packaging on a physical device. Emulators can run unit tests but cannot validate camera tracking, AR, real-device Jolt behavior or Vulkan rendering.
 
 ## Privacy
 
