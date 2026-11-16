@@ -299,7 +299,7 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
     final photoPath = _photoPath;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('العزل التفاعلي'),
+        title: const Text('مسح الأجسام الحقيقي'),
         actions: [
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 16),
