@@ -1,35 +1,37 @@
 # Roadmap
 
-## M0 — Flutter foundation
-- [x] Flutter project structure and Arabic-first app shell
-- [x] Home, studio, object library and settings screens
-- [x] Camera permission service
-- [x] CI workflow and starter widget test
-- [ ] Run Flutter analyze/test and Android build in CI
+## M0 — Flutter and CI foundation
+- [x] Arabic-first Flutter shell
+- [x] Camera hand-mirror experience
+- [x] AR session, plane detection and digital GLB placement
+- [x] MediaPipe hand, object detection and segmentation tasks
+- [x] Unit tests for pinch math
+- [ ] Green CI and Android debug APK
 
-## M1 — Camera and AR foundation
-- [ ] Live camera preview and lifecycle handling
-- [ ] ARCore support/capability detection
-- [ ] World tracking, plane detection and tap-to-place
-- [ ] Depth/occlusion on supported devices
+## M1 — Validate real devices
+- [ ] Test on at least one ARCore-certified Android phone
+- [ ] Test hand tracking on front/back cameras and device rotations
+- [ ] Record FPS, inference latency, memory and thermal behavior
+- [ ] Add model cache and error recovery tests
 
-## M2 — Natural interaction
-- [ ] MediaPipe hand landmarks
-- [ ] Pinch/grab, drag, rotate and throw
-- [ ] Confidence thresholds and tracking-loss recovery
+## M2 — Digital-object manipulation
+- [ ] Replace sample duck with an asset library and GLB import
+- [ ] Add two-hand scale/rotation and stable pinch release
+- [ ] Add digital-only collision proxies and physics
+- [ ] Add persistent world anchors where supported
 
-## M3 — Digital physics and realism
-- [ ] Physics objects and collision proxies
-- [ ] Light estimation, shadows and reflection probes
-- [ ] Performance and thermal adaptation
+## M3 — Advanced perception
+- [ ] Add ARCore Depth API and real-world occlusion
+- [ ] Evaluate EdgeSAM mobile port / Interactive Segmenter prompt workflow
+- [ ] Track object IDs across frames and preserve user-selected masks
+- [ ] Add depth-aware placement and shadow estimation
 
-## M4 — Perception and reconstruction
-- [ ] Object segmentation and persistent tracking IDs
-- [ ] GLB/GLTF import
-- [ ] Gaussian Splat / NeRF viewing and capture workflow
+## M4 — Reconstruction and simulation
+- [ ] Select a mobile-compatible Gaussian Splat renderer
+- [ ] Add splat playback with separate mesh collision proxies
+- [ ] Add soft-body and fluid simulation only after performance benchmarks
 
-## M5 — AI and advanced simulation
-- [ ] Voice commands
-- [ ] Scene-aware vision assistant
-- [ ] Fluids and soft-body simulation
-- [ ] Consent and privacy controls for local/remote inference
+## M5 — AI interaction
+- [ ] Voice command pipeline
+- [ ] Scene-aware assistant grounded in tracked object IDs
+- [ ] Local-first inference and explicit consent for remote processing

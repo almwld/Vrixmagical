@@ -1,19 +1,48 @@
 name: Flutter checks
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  analyze-test:
+  analyze-test-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-      - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test
-      - run: flutter analyze
-      - run: flutter test
+
+      - name: Bootstrap Android host
+        run: |
+          if [ ! -f android/gradlew ]; then
+            flutter create --platforms=android --org com.virxmagical --project-name virxmagical .
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Bundle pinned MediaPipe models
+        run: dart run mediapipe_core:bundle_models
+
+      - name: Format source
+        run: dart format lib test
+
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Unit and widget tests
+        run: flutter test --reporter expanded
+
+      - name: Android debug APK
+        run: flutter build apk --debug

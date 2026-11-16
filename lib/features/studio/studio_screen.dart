@@ -1,61 +1,96 @@
 import 'package:flutter/material.dart';
-import '../../services/ar_capability_service.dart';
+import '../hand/hand_mirror_screen.dart';
+import '../perception/scene_analysis_screen.dart';
+import 'ar_scene_screen.dart';
 
-class StudioScreen extends StatefulWidget {
+class StudioScreen extends StatelessWidget {
   const StudioScreen({super.key});
-  @override
-  State<StudioScreen> createState() => _StudioScreenState();
-}
-
-class _StudioScreenState extends State<StudioScreen> {
-  final capabilities = ArCapabilityService();
-  bool cameraGranted = false;
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('الاستوديو المكاني')),
-    body: Padding(
+    body: ListView(
       padding: const EdgeInsets.all(20),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF101A29),
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: const Color(0xFF2B4559)),
-            ),
-            child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.view_in_ar_rounded, size: 68, color: Color(0xFF4CE3D4)),
-              SizedBox(height: 18),
-              Text('مساحة المعاينة ثلاثية الأبعاد', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-              SizedBox(height: 8),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 28),
-                child: Text('سيتم هنا تشغيل بث الكاميرا وتتبع ARCore وإظهار الأجسام الرقمية المثبتة في البيئة.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF91A7BC), height: 1.6)),
-              ),
-              SizedBox(height: 20),
-              Text('واجهة الاستوديو — بانتظار ربط محرك AR', style: TextStyle(color: Color(0xFF8CEADF), fontSize: 11)),
-            ]),
+      children: [
+        const Text('اختر طريقة التفاعل', style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        const Text('كل التجارب تتحكم في تمثيل رقمي فقط. الكوب أو القلم أو أي جسم حقيقي يبقى كما هو.', style: TextStyle(color: Color(0xFF91A7BC), height: 1.6)),
+        const SizedBox(height: 22),
+        _StudioAction(
+          icon: Icons.view_in_ar_rounded,
+          title: 'الواقع المعزز المكاني',
+          subtitle: 'امسح الأسطح وثبّت مجسمات ثلاثية الأبعاد داخل الغرفة.',
+          tag: 'ARCore / ARKit',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ArSceneScreen())),
+        ),
+        _StudioAction(
+          icon: Icons.back_hand_rounded,
+          title: 'مرآة اليد الرقمية',
+          subtitle: 'امسك الأصل الرقمي بإيماءة القرص وحرّكه دون لمس الجسم الحقيقي.',
+          tag: 'MediaPipe Hand Landmarker',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HandMirrorScreen())),
+        ),
+        _StudioAction(
+          icon: Icons.center_focus_strong_rounded,
+          title: 'فهم المشهد والعزل',
+          subtitle: 'التقط صورة لاكتشاف الأجسام وإنشاء قناع تقسيم محلي.',
+          tag: 'Object Detector / Image Segmenter',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SceneAnalysisScreen())),
+        ),
+        const SizedBox(height: 14),
+        const _CapabilityNote(),
+      ],
+    ),
+  );
+}
+
+class _StudioAction extends StatelessWidget {
+  const _StudioAction({required this.icon, required this.title, required this.subtitle, required this.tag, required this.onTap});
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String tag;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    margin: const EdgeInsets.only(bottom: 14),
+    color: const Color(0xFF111B2A),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(children: [
+          Container(
+            width: 52, height: 52,
+            decoration: BoxDecoration(color: const Color(0xFF1B3441), borderRadius: BorderRadius.circular(16)),
+            child: Icon(icon, color: const Color(0xFF55E3D4), size: 27),
           ),
-        ),
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: () async {
-            final granted = await capabilities.requestCameraPermission();
-            if (!mounted) return;
-            setState(() => cameraGranted = granted);
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(granted ? 'تم منح إذن الكاميرا' : 'لم يتم منح إذن الكاميرا')));
-          },
-          icon: const Icon(Icons.camera_alt_outlined),
-          label: Text(cameraGranted ? 'إذن الكاميرا متاح' : 'تجهيز الكاميرا'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('سيتم تفعيل إنشاء الأجسام بعد دمج محرك AR والفيزياء.'))),
-          icon: const Icon(Icons.add_box_outlined),
-          label: const Text('إضافة جسم رقمي'),
-        ),
-      ]),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 5),
+            Text(subtitle, style: const TextStyle(color: Color(0xFF91A7BC), fontSize: 12, height: 1.5)),
+            const SizedBox(height: 8),
+            Text(tag, style: const TextStyle(color: Color(0xFF62DCCE), fontSize: 10, letterSpacing: .4)),
+          ])),
+          const Icon(Icons.chevron_right, color: Color(0xFF71869A)),
+        ]),
+      ),
+    ),
+  );
+}
+
+class _CapabilityNote extends StatelessWidget {
+  const _CapabilityNote();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(15),
+    decoration: BoxDecoration(color: const Color(0xFF172536), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFF29465B))),
+    child: const Text(
+      'ملاحظة: وضع AR يحتاج هاتفاً يدعم ARCore وخدمات Google Play للواقع المعزز. وضع اليد يستخدم الكاميرا بصورة مستقلة؛ لا نشغّل جلستي كاميرا متعارضتين في الوقت نفسه.',
+      style: TextStyle(color: Color(0xFFA9BED0), fontSize: 12, height: 1.6),
     ),
   );
 }

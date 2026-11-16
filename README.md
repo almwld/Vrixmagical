@@ -1,37 +1,56 @@
-# VirxMagical
+# VirxMagical — Digital Reality Engine
 
-VirxMagical is an Android-first Flutter application for a hybrid Digital Reality Engine: digital objects anchored to the physical world, with hand interaction, spatial understanding, simulated physics, lighting and AI-assisted scene perception.
+VirxMagical is an Android-first Flutter application for interactive digital representations of physical objects. The digital layer can be moved and transformed while the real source object remains unchanged.
 
-## Initial Flutter milestone
+## Implemented application paths
 
-- Arabic-first Material 3 interface.
-- Home dashboard and navigation.
-- Spatial Studio entry screen.
-- Digital object library.
-- Settings screen.
-- Camera permission service.
-- Flutter CI workflow and starter widget test.
+- Arabic-first Flutter app shell and navigation.
+- **AR scene:** native ARCore/ARKit session through `flutter_reality`, horizontal/vertical plane detection, tap hit-testing, anchor creation, GLB sample placement, drag/rotate and remove.
+- **Hand mirror:** camera preview plus Google's MediaPipe Hand Landmarker in live-stream mode. A pinch grabs and moves a digital overlay; the physical source object is never modified.
+- **Scene analysis:** on-device MediaPipe Object Detector and Image Segmenter on a captured frame.
+- **Unit tests:** normalized pinch-distance logic.
 
-The live AR camera renderer, ARCore plane/depth tracking, MediaPipe hand tracking, object segmentation, physics interaction, Gaussian Splat playback, fluids and AI scene understanding are not yet integrated. The interface explicitly presents these as planned work.
+## Camera ownership
 
-## Planned architecture
+The AR scene and hand-mirror experience are separate modes. ARCore/ARKit owns the camera while an AR session is active; opening a second Flutter camera stream at the same time would contend for the same hardware camera. The app therefore closes one experience before entering the other.
 
-- Flutter: app shell, navigation, settings and asset management.
-- Native Android / ARCore (or an embedded Unity runtime): camera tracking, planes, depth and occlusion.
-- MediaPipe: hand landmarks and gestures.
-- SAM 2 / mobile segmentation: object masks and tracking, subject to device and license evaluation.
-- Depth estimation: ARCore Depth where supported; monocular fallback is an estimate.
-- Physics: Unity PhysX or a compatible native simulation layer.
-- Gaussian Splatting / NeRF: optional visual reconstruction; separate mesh proxies are required for reliable collision.
-- Voice and vision-language model: scene-aware commands, with explicit consent for remote inference.
+## Technology map
 
-## Run
+| Technology | Role | Current integration |
+|---|---|---|
+| Flutter | App UI, state and navigation | Integrated |
+| ARCore / ARKit | World tracking, planes, anchors and hit tests | Integrated through flutter_reality; physical-device validation pending |
+| MediaPipe Hand Landmarker | 21 hand landmarks and pinch tracking | Integrated live-stream path; device validation pending |
+| MediaPipe Object Detector | Object labels and bounding boxes | Integrated still-frame analysis |
+| MediaPipe Image Segmenter | Per-pixel category mask | Integrated still-frame analysis |
+| EdgeSAM / SAM 2 | Promptable object cut-outs | Research/source reference only; not yet integrated into Android runtime |
+| Depth Anything / AR depth | Metric depth and occlusion | Not yet integrated; ARCore depth support varies by device |
+| Gaussian Splatting / NeRF | Reconstructed scene rendering | Source reference exists under `splatkit/`; Flutter renderer not yet integrated |
+| Physics / fluids | Digital rigid bodies, soft bodies and fluids | Not yet integrated in Flutter runtime |
+| Voice / vision-language model | Natural-language scene commands | Not yet integrated |
+
+The repository also retains separate research implementations under `Telekinesis-CV/`, `web-ar-hand-tracking/`, `splatkit/`, `arfoundation-samples/` and `xr_sandbox/`. These are source references, not automatically linked runtime modules. Check each upstream license before redistributing assets or code.
+
+## MediaPipe model packaging
+
+Models are declared as build-time bundled models. Run:
 
     flutter pub get
+    dart run mediapipe_core:bundle_models
     flutter analyze
     flutter test
     flutter run
 
-Install Flutter stable and Android SDK first. AR features require a compatible physical Android device.
+No model is silently downloaded at first launch. The explicit bundling step retrieves the package's pinned model files and verifies their digests.
 
-See docs/INTEGRATION_STATUS.md and docs/ROADMAP.md.
+## Android platform bootstrap
+
+The initial Flutter commit did not include generated Android platform files. Create them once with:
+
+    flutter create --platforms=android --org com.virxmagical .
+
+Then set Android minSdk to 28 or higher for the AR plugin. Build and test on a physical ARCore-certified phone with Google Play Services for AR installed. Emulators can run unit tests but cannot validate camera tracking or AR.
+
+## Privacy
+
+Camera frames are processed locally by default. The app does not upload camera frames to a server. The sample GLB model is fetched from the Khronos public sample-assets repository when placed; replace it with bundled/licensed assets for offline production use.
