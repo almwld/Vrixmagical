@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../domain/vrix_object.dart';
 
@@ -94,6 +96,11 @@ class ObjectLibraryCatalog {
     return ObjectLibraryCatalog._(List.unmodifiable(entries));
   }
 
+  Map<String, dynamic> toJson() => {
+        'schemaVersion': 1,
+        'assets': assets.map((asset) => asset.toJson()).toList(),
+      };
+
   List<CatalogAsset> search({
     String? query,
     String? category,
@@ -109,5 +116,85 @@ class ObjectLibraryCatalog {
       return asset.object.displayName.toLowerCase().contains(needle) ||
           asset.object.tags.any((tag) => tag.toLowerCase().contains(needle));
     }).toList(growable: false);
+  }
+}
+
+
+/// Persistent local catalog for user-imported GLB/GLTF files.
+class ObjectLibraryStore {
+  ObjectLibraryStore._(this.rootDirectory, this._catalog, this._manifestFile);
+
+  final Directory rootDirectory;
+  ObjectLibraryCatalog _catalog;
+  final File _manifestFile;
+
+  ObjectLibraryCatalog get catalog => _catalog;
+
+  static Future<ObjectLibraryStore> open({
+    Directory? supportDirectory,
+    AssetBundle bundle = rootBundle,
+    String manifestPath = 'assets/models/manifest.json',
+  }) async {
+    final root = supportDirectory ?? await getApplicationSupportDirectory();
+    await root.create(recursive: true);
+    final file = File('${root.path}/object_library.json');
+    final raw = await file.exists()
+        ? await file.readAsString()
+        : await bundle.loadString(manifestPath);
+    return ObjectLibraryStore._(root, ObjectLibraryCatalog.decode(raw), file);
+  }
+
+  Future<CatalogAsset> importModel(String sourcePath) async {
+    final source = File(sourcePath);
+    if (!await source.exists()) {
+      throw const FileSystemException('Selected 3D model does not exist.');
+    }
+    final extension = source.path.split('.').last.toLowerCase();
+    if (extension != 'glb' && extension != 'gltf') {
+      throw const FormatException('Only GLB and GLTF models can be imported.');
+    }
+
+    final originalName = source.uri.pathSegments.isEmpty
+        ? 'model'
+        : source.uri.pathSegments.last;
+    final stem = originalName.replaceFirst(RegExp(r'\\.(glb|gltf)$', caseSensitive: false), '');
+    final safeStem = stem.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]+'), '-');
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final fileName = '${timestamp}_${safeStem.isEmpty ? 'model' : safeStem}.$extension';
+    final relativePath = 'models/imported/$fileName';
+    final destination = File('${rootDirectory.path}/$relativePath');
+    await destination.parent.create(recursive: true);
+    await source.copy(destination.path);
+
+    final tags = safeStem.split(RegExp(r'[-_]+')).where((tag) => tag.isNotEmpty).toSet().toList();
+    final object = VrixObject(
+      id: 'import-$timestamp',
+      source: ObjectSource.imported,
+      displayName: stem.isEmpty ? 'Imported model' : stem,
+      meshPath: relativePath,
+      physics: const PhysicsProfile(),
+      tags: tags.isEmpty ? const ['imported', '3d-model'] : tags,
+      metadata: const {'userProvided': true, 'format': 'glb-or-gltf'},
+    );
+    final asset = CatalogAsset(
+      object: object,
+      category: 'imported',
+      license: 'User-provided',
+      sourceName: 'Local import',
+    );
+    asset.validate();
+    _catalog = ObjectLibraryCatalog._(
+      List.unmodifiable([..._catalog.assets, asset]),
+    );
+    await _save();
+    return asset;
+  }
+
+  Future<void> _save() async {
+    await _manifestFile.parent.create(recursive: true);
+    final temporary = File('${_manifestFile.path}.tmp');
+    await temporary.writeAsString(jsonEncode(_catalog.toJson()), flush: true);
+    if (await _manifestFile.exists()) await _manifestFile.delete();
+    await temporary.rename(_manifestFile.path);
   }
 }
