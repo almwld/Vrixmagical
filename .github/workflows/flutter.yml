@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: flutter-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze-test-build:
     runs-on: ubuntu-latest
@@ -29,7 +33,13 @@ jobs:
       - name: Verify native SplatKit dependency
         run: |
           cd android
-          ./gradlew :app:dependencyInsight --dependency splatkit-android --configuration debugCompileClasspath | tee /tmp/splatkit-dependency.txt
+          for attempt in 1 2 3; do
+            if ./gradlew :app:dependencyInsight --dependency splatkit-android --configuration debugCompileClasspath | tee /tmp/splatkit-dependency.txt; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 20))
+          done
           grep -F 'io.github.xget7:splatkit-android:0.1.0-beta.3' /tmp/splatkit-dependency.txt
 
       - name: Bundle pinned MediaPipe models
