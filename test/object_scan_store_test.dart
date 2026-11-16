@@ -30,7 +30,7 @@ void main() {
           promptY: .5,
         );
 
-    test('persists source images, masks and a versioned manifest', () async {
+    test('persists source images and marks legacy camera pose as untrusted', () async {
       final store = await ObjectScanStore.create(
         displayName: 'Desk object',
         rootDirectory: root,
@@ -46,7 +46,7 @@ void main() {
       expect(text, contains('column-major-world-from-camera-meters'));
       expect(text, contains('unverified-unsynchronized'));
       expect(text, contains('"cameraPose":null'));
-      expect(text, contains('"schemaVersion":2'));\n      expect(text, contains('unverified-unsynchronized'));\n      expect(text, contains('"cameraPose":null'));\n      expect(text, contains('"schemaVersion":2'));
+      expect(text, contains('"schemaVersion":2'));
       expect(await File('${store.directory.path}/view_001.jpg').exists(), isTrue);
       expect(await File('${store.directory.path}/mask_001.png').exists(), isTrue);
     });
