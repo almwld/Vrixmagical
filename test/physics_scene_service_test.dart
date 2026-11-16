@@ -97,6 +97,27 @@ void main() {
       expect(hits.first.bodyId, 'query-box');
     });
 
+    test('supports overlap and swept-volume shape queries', () {
+      physics.addStaticBox(
+        id: 'query-target',
+        worldTransform: Matrix4.identity(),
+        halfExtents: Vector3.all(0.3),
+      );
+
+      final overlaps = physics.overlapBox(
+        Matrix4.identity(),
+        Vector3.all(0.1),
+      );
+      expect(overlaps.any((hit) => hit.bodyId == 'query-target'), isTrue);
+
+      final casts = physics.shapeCastBox(
+        Matrix4.identity()..setTranslation(Vector3(0, 2, 0)),
+        Vector3.all(0.1),
+        Vector3(0, -3, 0),
+      );
+      expect(casts.any((hit) => hit.bodyId == 'query-target'), isTrue);
+    });
+
     test('supports constraints and preserves joint graph during body teleports', () {
       physics.addDynamicBox(
         id: 'joint-a',
