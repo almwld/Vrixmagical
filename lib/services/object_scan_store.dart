@@ -67,6 +67,7 @@ class ObjectScanStore {
   final String id;
   final String displayName;
   final List<Map<String, Object?>> _views = [];
+  final DateTime _createdAt = DateTime.now().toUtc();
   bool _complete = false;
 
   int get viewCount => _views.length;
@@ -128,6 +129,7 @@ class ObjectScanStore {
       });
       await _writeManifest();
     } catch (_) {
+      if (_views.isNotEmpty && _views.last['index'] == index) _views.removeLast();
       if (await imageTarget.exists()) await imageTarget.delete();
       if (await maskTarget.exists()) await maskTarget.delete();
       rethrow;
@@ -158,7 +160,7 @@ class ObjectScanStore {
       'displayName': displayName,
       'source': 'captured',
       'captureKind': 'masked-multiview-rgb',
-      'createdAt': id.substring(5),
+      'createdAt': _createdAt.toIso8601String(),
       'updatedAt': DateTime.now().toUtc().toIso8601String(),
       'status': _complete ? 'captured' : 'collecting',
       'viewCount': _views.length,
@@ -171,7 +173,6 @@ class ObjectScanStore {
     };
     final temporary = File('${_manifest.path}.tmp');
     await temporary.writeAsString(jsonEncode(payload), flush: true);
-    if (await _manifest.exists()) await _manifest.delete();
     await temporary.rename(_manifest.path);
   }
 }
