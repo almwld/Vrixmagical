@@ -55,6 +55,9 @@ class Vec3 {
   static Vec3 lerp(Vec3 a, Vec3 b, double t) => a + (b - a) * t;
 }
 
+bool _isFiniteVec3(Vec3 value) =>
+    value.x.isFinite && value.y.isFinite && value.z.isFinite;
+
 /// Two-hand transform math ported from the hand-interaction research projects.
 /// Callers own landmark tracking and coordinate-space conversion.
 class TwoHandTransform {
