@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:math' as math;
 
@@ -178,12 +179,15 @@ class PhysicsSceneService {
   final Map<String, _BodyRecord> _bodies = <String, _BodyRecord>{};
   final Map<int, String> _bodyIdsByHandle = <int, String>{};
   final Map<String, _JointRecord> _joints = <String, _JointRecord>{};
+  final StreamController<PhysicsContactEvent> _eventController =
+      StreamController<PhysicsContactEvent>.broadcast(sync: true);
   double _accumulator = 0;
   bool _disposed = false;
 
   int get bodyCount => _bodies.length;
   int get jointCount => _joints.length;
   bool get isDisposed => _disposed;
+  Stream<PhysicsContactEvent> get events => _eventController.stream;
 
   void addStaticBox({
     required String id,
@@ -1059,6 +1063,9 @@ class PhysicsSceneService {
         maxEvents - events.length,
       ).toInt();
     }
+    for (final event in events) {
+      _eventController.add(event);
+    }
     return events;
   }
 
@@ -1262,6 +1269,7 @@ class PhysicsSceneService {
     _bodyIdsByHandle.clear();
     _joints.clear();
     _accumulator = 0;
+    _eventController.close();
   }
 
   Matrix4 _matrixFromPose(Pointer<Float> values, int offset) {
