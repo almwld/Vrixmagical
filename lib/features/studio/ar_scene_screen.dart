@@ -14,6 +14,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:vector_math/vector_math_64.dart' show Matrix4, Quaternion, Vector3;
 
 import '../../app/app_theme.dart';
+import '../../domain/vrix_object.dart';
 import '../../services/physics_scene_service.dart';
 
 class _PlacedAsset {
@@ -23,6 +24,7 @@ class _PlacedAsset {
     required this.anchorWorldTransform,
     required this.bodyId,
     required this.floorBodyId,
+    required this.identity,
   });
 
   final ARPlaneAnchor anchor;
@@ -30,6 +32,7 @@ class _PlacedAsset {
   final Matrix4 anchorWorldTransform;
   final String bodyId;
   final String floorBodyId;
+  final VrixObject identity;
 }
 
 class ArSceneScreen extends StatefulWidget {
@@ -258,6 +261,22 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         return;
       }
 
+      final identity = VrixObject(
+        id: node.name,
+        source: ObjectSource.library,
+        displayName: 'Duck sample',
+        meshPath: _sampleModel,
+        physics: const PhysicsProfile(
+          mass: 1,
+          collider: ColliderShape.box,
+          halfExtents: [0.07, 0.06, 0.09],
+          friction: 0.65,
+          restitution: 0.08,
+        ),
+        tags: const ['duck', 'bird', 'sample', 'movable'],
+        metadata: const {'assetKind': 'sample', 'format': 'glb'},
+      );
+
       final physics = _physics;
       if (physics != null && !physics.isDisposed) {
         floorBodyId = 'floor_${node.name}';
@@ -292,9 +311,15 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         physics.addDynamicBox(
           id: dynamicBodyId,
           worldTransform: bodyTransform,
-          halfExtents: Vector3(0.07, 0.06, 0.09),
-          friction: 0.65,
-          restitution: 0.08,
+          halfExtents: Vector3(
+            identity.physics.halfExtents[0],
+            identity.physics.halfExtents[1],
+            identity.physics.halfExtents[2],
+          ),
+          friction: identity.physics.friction,
+          restitution: identity.physics.restitution,
+          mass: identity.physics.mass,
+          continuous: identity.physics.continuous,
         );
       }
 
@@ -307,6 +332,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
             anchorWorldTransform: anchorTransform,
             bodyId: dynamicBodyId ?? '',
             floorBodyId: floorBodyId ?? '',
+            identity: identity,
           ),
         );
         _status = physics == null
