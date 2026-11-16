@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../app/app_theme.dart';
@@ -11,28 +12,65 @@ class ObjectLibraryScreen extends StatefulWidget {
 }
 
 class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
-  late Future<ObjectLibraryCatalog> _catalog;
+  late Future<ObjectLibraryStore> _storeFuture;
   String _query = '';
+  bool _importing = false;
 
   @override
   void initState() {
     super.initState();
-    _catalog = ObjectLibraryCatalog.load();
+    _storeFuture = ObjectLibraryStore.open();
+  }
+
+  Future<void> _importModel() async {
+    if (_importing) return;
+    setState(() => _importing = true);
+    try {
+      final selection = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['glb', 'gltf'],
+      );
+      final path = selection?.files.single.path;
+      if (path == null) return;
+      final store = await _storeFuture;
+      final imported = await store.importModel(path);
+      if (!mounted) return;
+      setState(() => _storeFuture = Future.value(store));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تم استيراد ${imported.object.displayName}')),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذّر استيراد النموذج: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
           title: const Text('مكتبة الأصول'),
-          actions: const [
-            Padding(
-              padding: EdgeInsetsDirectional.only(end: 18),
-              child: Icon(Icons.inventory_2_outlined, color: AppColors.muted),
+          actions: [
+            IconButton(
+              tooltip: 'استيراد GLB / GLTF',
+              onPressed: _importing ? null : _importModel,
+              icon: _importing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_box_outlined),
             ),
+            const SizedBox(width: 8),
           ],
         ),
-        body: FutureBuilder<ObjectLibraryCatalog>(
-          future: _catalog,
+        body: FutureBuilder<ObjectLibraryStore>(
+          future: _storeFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
@@ -42,14 +80,14 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
-                    'تعذّر تحميل فهرس الأصول: ${snapshot.error}',
+                    'تعذّر تحميل مكتبة الأصول: ${snapshot.error}',
                     textAlign: TextAlign.center,
                   ),
                 ),
               );
             }
-            final catalog = snapshot.data!;
-            final assets = catalog.search(query: _query);
+            final store = snapshot.data!;
+            final assets = store.catalog.search(query: _query);
             return ListView(
               physics: const BouncingScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
@@ -80,7 +118,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                       ),
                       SizedBox(height: 7),
                       Text(
-                        'أصول ثلاثية الأبعاد بهوية موحّدة وبيانات ترخيص وفيزياء قابلة لإعادة الاستخدام.',
+                        'استورد نماذج GLB وGLTF محلياً، واحتفظ بهويتها ووسومها وملفها الفيزيائي في فهرس واحد.',
                         style: TextStyle(
                             color: Color(0xFFB5C5D8),
                             fontSize: 11,
@@ -136,12 +174,12 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                             size: 34, color: AppColors.muted),
                         SizedBox(height: 10),
                         Text(
-                          'لا توجد نماذج محزّمة بعد',
+                          'مكتبتك فارغة حالياً',
                           style: TextStyle(fontWeight: FontWeight.w800),
                         ),
                         SizedBox(height: 6),
                         Text(
-                          'الفهرس جاهز ويعرض فقط الملفات الموجودة فعلياً. ستضاف حزم CC0 بعد التحقق من الملفات وتراخيصها.',
+                          'اضغط زر الإضافة لاستيراد نموذج GLB أو GLTF. ستُحفظ الملفات محلياً مع بياناتها.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               color: AppColors.muted,
