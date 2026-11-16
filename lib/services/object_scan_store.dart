@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 /// Camera pose/depth are deliberately nullable until the ARCore bridge supplies
 /// calibrated measurements; a photo-only bundle must never masquerade as a mesh.
 class ObjectScanView {
-  const ObjectScanView({
+  ObjectScanView({
     required this.imageFile,
     required this.maskPng,
     required this.width,
