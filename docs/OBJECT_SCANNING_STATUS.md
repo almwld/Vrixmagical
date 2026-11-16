@@ -3,11 +3,11 @@
 ## Implemented in the Flutter app
 
 - The scanner now uses the existing `flutter_reality` ARView as the **single camera/session owner**; it does not open a competing Flutter camera stream.
-- Each capture obtains an AR scene snapshot and the AR camera's world pose from the active AR session, then runs the existing on-device MediaPipe Interactive Segmenter on that captured image.
+- Each capture obtains an AR scene snapshot from the active AR session and runs the existing on-device MediaPipe Interactive Segmenter on that captured image. The legacy camera-pose request is a separate native call and is retained only as an explicitly unverified candidate; it is never exposed as calibrated reconstruction input.
 - The user can refine a foreground mask with touch prompts and save each RGB image, PNG mask, mask dimensions, prompt coordinates and 4x4 camera transform.
-- The camera transform is stored as a column-major world-from-camera matrix in meters. A pose is captured once per user-requested view, not polled on every rendered frame.
+- Legacy camera-pose candidates are stored separately with `cameraPoseStatus: unverified-unsynchronized`; the trusted `cameraPose` field remains null until RGB, pose and depth arrive from one ARCore frame timestamp. The manifest schema is now version 2.
 - Each scan is stored under the app support directory at `vrix_scans/<scan-id>/`; temporary AR captures are staged under `vrix_scans/_captures/`.
-- `scan_manifest.json` is versioned and records view index, image/mask filenames, image and mask dimensions, capture timestamp, normalized prompt and camera pose.
+- `scan_manifest.json` schema v2 records view index, image/mask filenames, image and mask dimensions, capture timestamp, normalized prompt, and an explicit camera-pose trust state.
 - A scan session cannot be marked captured until at least three views are saved. The store caps a session at 80 views and uses temporary-manifest replacement.
 - The scanner is launched from the Spatial Studio's real object scanning tool. The former still-camera capture path remains available as a fallback.
 
@@ -22,7 +22,7 @@ The existing plugin's `getCameraPose()` implementation performs a one-shot `sess
 This remains a calibrated multi-view RGB + mask capture dataset, not a reconstructed 3D object. The manifest intentionally records `depthMap: null` and reconstruction status `not_started`.
 
 The next integration must:
-1. Extend the native AR plugin frame callback to export camera pose, camera intrinsics, tracking state, timestamp and depth/confidence images from the **same ARCore frame**; avoid a second camera/session.
+1. Maintain a VRIX fork of `flutter_reality` and extend its existing native `ArView.onFrame` callback to export camera pose, camera intrinsics, tracking state, timestamp and depth/confidence images from the **same ARCore frame**; avoid a second camera/session or a second `session.update()`.
 2. Register RGB/mask/depth in one coordinate system, including image rotation/crop and depth-to-color UV mapping; reject non-tracking or low-confidence frames.
 3. Fuse masked depth into a bounded point cloud, filter outliers, estimate normals and generate a mesh/collider. Gaussian Splat reconstruction remains a separate visual output path.
 4. Add EdgeSAM Android ONNX inference only after model licensing is cleared, the model SHA-256 is verified, and Android runtime compatibility is tested. MediaPipe remains the on-device fallback.
@@ -34,3 +34,13 @@ The physical reference target is LG V60 ThinQ 5G (LM-F100). CI tests cannot prov
 ## Safety and data handling
 
 Captured photos and masks remain in app-private storage. No scan uploads are performed by this feature. Do not log image bytes, file contents or user-generated object imagery.
+
+## New calibrated data contracts (November 2026)
+
+- `lib/domain/captured_frame.dart` defines the immutable-by-contract RGB-D frame boundary, depth capability state, stream-specific intrinsics and strict timestamp equality.
+- Frame validation rejects paused/stopped tracking, malformed intrinsics, non-finite data, non-affine poses, non-orthonormal rotations and depth/RGB timestamp mismatches.
+- `DepthAligner` projects lower-resolution depth samples into RGB pixel coordinates using separate depth/RGB intrinsics and a nearest-surface z-buffer; it carries confidence through registration.
+- `MaskedPointCloudBuilder` filters by segmentation mask, confidence, depth range and pixel stride, then back-projects points through the world-from-camera pose.
+- Unit tests cover timestamp synchronization, pose orthonormality, intrinsics, tracking state, depth registration, confidence rejection and point-cloud projection.
+
+These are implemented Dart contracts and deterministic processing primitives. They do **not** mean the Android bridge is already connected: the app still needs the maintained native plugin fork and the ARCore device probe before any depth-backed scan can be claimed.
