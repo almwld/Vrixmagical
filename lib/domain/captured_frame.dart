@@ -56,15 +56,22 @@ class DepthFrame {
     required this.confidence,
     required this.width,
     required this.height,
-    required this.timestampNs,
+    required this.frameTimestampNs,
+    required this.imageTimestampNs,
     required this.intrinsics,
+    this.isReprojected = false,
   });
 
   final Float32List valuesMeters;
   final Uint8List confidence;
   final int width;
   final int height;
-  final int timestampNs;
+  /// Timestamp of the ARCore Frame that supplied this image. This must match
+  /// [CapturedFrame.frameTimestampNs].
+  final int frameTimestampNs;
+  /// Raw Android Image timestamp; raw depth may retain this across reprojected frames.
+  final int imageTimestampNs;
+  final bool isReprojected;
   final CameraIntrinsics intrinsics;
 
   void validate() {
@@ -74,8 +81,8 @@ class DepthFrame {
         confidence.length != width * height) {
       throw const FormatException('Depth and confidence buffers must match depth dimensions.');
     }
-    if (timestampNs <= 0) {
-      throw const FormatException('Depth timestamp must be a positive ARCore nanosecond timestamp.');
+    if (frameTimestampNs <= 0 || imageTimestampNs <= 0) {
+      throw const FormatException('Depth frame and image timestamps must be positive.');
     }
     if (intrinsics.width != width || intrinsics.height != height) {
       throw const FormatException('Depth intrinsics must describe the depth image dimensions.');
@@ -89,11 +96,14 @@ class DepthFrame {
   }
 }
 
-/// A single synchronized RGB-D observation from one ARCore Frame.
+/// A single synchronized RGB-D observation assembled inside one ARCore Frame callback.
+/// The depth Image timestamp may be older than the Frame timestamp because ARCore
+/// can reproject the last raw-depth estimate into the current frame.
 /// cameraPose is a column-major world-from-camera 4x4 matrix in meters.
 class CapturedFrame {
   CapturedFrame({
     required this.rgbBytes,
+    required this.frameTimestampNs,
     required this.rgbTimestampNs,
     required this.rgbIntrinsics,
     required this.cameraPose,
@@ -104,6 +114,9 @@ class CapturedFrame {
   });
 
   final Uint8List rgbBytes;
+  /// ARCore Frame timestamp shared by all values acquired inside one callback.
+  final int frameTimestampNs;
+  /// Timestamp of the acquired CPU camera Image, not PixelCopy's surface copy.
   final int rgbTimestampNs;
   final CameraIntrinsics rgbIntrinsics;
   final Float64List cameraPose;
@@ -116,7 +129,7 @@ class CapturedFrame {
   int get rgbHeight => rgbIntrinsics.height;
 
   void validate({bool requireDepth = false}) {
-    if (rgbBytes.isEmpty || rgbTimestampNs <= 0) {
+    if (rgbBytes.isEmpty || frameTimestampNs <= 0 || rgbTimestampNs <= 0) {
       throw const FormatException('RGB payload and positive frame timestamp are required.');
     }
     rgbIntrinsics.validate();
@@ -134,9 +147,9 @@ class CapturedFrame {
     }
     if (depth != null) {
       depth!.validate();
-      if (depth!.timestampNs != rgbTimestampNs) {
+      if (depth!.frameTimestampNs != frameTimestampNs) {
         throw const FormatException(
-          'RGB and Depth must originate from the exact same ARCore frame timestamp.',
+          'RGB and Depth must be acquired from the same ARCore Frame callback.',
         );
       }
       if (depthSupport == VrixDepthSupport.unsupported ||
