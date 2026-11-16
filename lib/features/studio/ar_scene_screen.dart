@@ -11,7 +11,7 @@ import 'package:flutter_reality/models/ar_anchor.dart';
 import 'package:flutter_reality/models/ar_hittest_result.dart';
 import 'package:flutter_reality/models/ar_node.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:vector_math/vector_math_64.dart' show Matrix4, Vector3;
+import 'package:vector_math/vector_math_64.dart' show Matrix4, Quaternion, Vector3;
 
 import '../../app/app_theme.dart';
 import '../../services/physics_scene_service.dart';
@@ -157,9 +157,13 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         if (worldTransform == null) continue;
         final anchorInverse = Matrix4.copy(asset.anchorWorldTransform)..invert();
         final localTransform = anchorInverse..multiply(worldTransform);
+        final localPosition = Vector3.zero();
+        final localRotation = Quaternion.identity();
+        final localScale = Vector3.zero();
+        localTransform.decompose(localPosition, localRotation, localScale);
         asset.node.transform = Matrix4.compose(
-          localTransform.getTranslation(),
-          Quaternion.fromRotation(localTransform.getRotation()),
+          localPosition,
+          localRotation,
           asset.node.scale,
         );
       }
