@@ -12,11 +12,11 @@ if splatkit_dependency not in text:
     if "dependencies {" in text:
         text = text.replace(
             "dependencies {",
-            "dependencies {\\n    " + splatkit_dependency,
+            "dependencies {\n    " + splatkit_dependency,
             1,
         )
     else:
-        text += "\\n\\ndependencies {\\n    " + splatkit_dependency + "\\n}\\n"
+        text += "\n\ndependencies {\n    " + splatkit_dependency + "\n}\n"
 if splatkit_dependency not in text:
     raise SystemExit("Failed to add the SplatKit Android dependency to app/build.gradle.kts.")
 if "abiFilters" not in text:
