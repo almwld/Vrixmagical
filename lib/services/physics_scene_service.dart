@@ -722,7 +722,7 @@ class PhysicsSceneService {
         rotation,
         jolt.JPH_Activation_Activate,
       );
-      if (resetVelocity) {
+      if (resetVelocity && record.motionType != jolt.JJ_MOTION_STATIC) {
         final zero = arena<jolt.JPH_Vec3>();
         zero.ref..x = 0..y = 0..z = 0;
         jolt.JPH_BodyInterface_SetLinearVelocity(
@@ -743,6 +743,9 @@ class PhysicsSceneService {
     }
     final record = _bodies[id];
     if (record == null) return;
+    if (record.motionType != jolt.JJ_MOTION_DYNAMIC) {
+      throw StateError('Linear velocity can only be set on dynamic bodies.');
+    }
     using((arena) {
       final value = arena<jolt.JPH_Vec3>();
       _writeVector(value, velocity);
@@ -762,6 +765,9 @@ class PhysicsSceneService {
     }
     final record = _bodies[id];
     if (record == null) return;
+    if (record.motionType != jolt.JJ_MOTION_DYNAMIC) {
+      throw StateError('Impulses can only be applied to dynamic bodies.');
+    }
     using((arena) {
       final value = arena<jolt.JPH_Vec3>();
       _writeVector(value, impulse);
@@ -780,6 +786,9 @@ class PhysicsSceneService {
     }
     final record = _bodies[id];
     if (record == null) return;
+    if (record.motionType != jolt.JJ_MOTION_DYNAMIC) {
+      throw StateError('Forces can only be applied to dynamic bodies.');
+    }
     using((arena) {
       final value = arena<jolt.JPH_Vec3>();
       _writeVector(value, force);
