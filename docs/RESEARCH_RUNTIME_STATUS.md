@@ -8,7 +8,7 @@ Updated for `feature/production-jolt-physics`.
 |---|---|---|
 | Native 3D engine | Jolt Physics 5.6 via standalone `just_jolt` FFI build hook | Native Android packaging and physical-device startup still required |
 | Rigid bodies | Static/dynamic bodies, mass, damping, gravity factor, sleeping | Kinematic body control is not exposed in the app adapter |
-| Collider shapes | Box, sphere and capsule | Mesh/convex-hull/compound authoring and GLB collider import not yet wired |
+| Collider shapes | Box, sphere, capsule, dynamic convex hull and static triangle mesh | Automatic GLB mesh extraction, compound collider authoring and per-asset collider import not yet wired |
 | Contact response | Jolt broadphase/narrowphase, friction, restitution and sleeping | Scene-specific material tuning and contact regression tests pending |
 | Continuous collision | Jolt linear-cast motion quality for fast dynamic bodies | High-speed tunneling test matrix pending |
 | Sensors/events | Sensor bodies; buffered contact begin/end, sensor begin/end and activation events | App-specific gameplay consumers are not yet wired |
