@@ -56,12 +56,12 @@ void main() {
       expect(
         () => physics.addBody(PhysicsBody(
           objectId: 'infinite-velocity',
-          position: Vec3.zero(),
+          position: const Vec3.zero(),
           velocity: const Vec3(double.infinity, 0, 0),
         )),
         throwsArgumentError,
       );
-      physics.addBody(PhysicsBody(objectId: 'valid', position: Vec3.zero()));
+      physics.addBody(PhysicsBody(objectId: 'valid', position: const Vec3.zero()));
       expect(
         () => physics.applyImpulse('valid', const Vec3(0, double.nan, 0)),
         throwsArgumentError,
@@ -112,7 +112,7 @@ void main() {
     });
 
     test('resolves a head-on collision between equal dynamic bodies', () {
-      final physics = FixedStepPhysics(gravity: Vec3.zero(), solverIterations: 2);
+      final physics = FixedStepPhysics(gravity: const Vec3.zero(), solverIterations: 2);
       physics.addBody(PhysicsBody(
         objectId: 'left',
         position: const Vec3(-.6, 0, 0),
@@ -152,7 +152,7 @@ void main() {
         )),
         throwsStateError,
       );
-      physics.addBody(PhysicsBody(objectId: 'box', position: Vec3.zero()));
+      physics.addBody(PhysicsBody(objectId: 'box', position: const Vec3.zero()));
       expect(
         () => physics.addCollider(const Collider(
           objectId: 'box',
@@ -192,8 +192,8 @@ void main() {
 
   test('scene registry enforces identity and consequential-action confirmation', () {
     final registry = SceneObjectRegistry();
-    registry.register(const SceneObject(id: 'lamp_1', position: Vec3.zero()));
-    expect(() => registry.register(const SceneObject(id: 'lamp_1', position: Vec3.zero())), throwsStateError);
+    registry.register(const SceneObject(id: 'lamp_1', position: const Vec3.zero()));
+    expect(() => registry.register(const SceneObject(id: 'lamp_1', position: const Vec3.zero())), throwsStateError);
     expect(registry.apply(const SceneCommand(type: SceneCommandType.hide, objectId: 'lamp_1')), isTrue);
     expect(registry['lamp_1']!.visible, isFalse);
     const delete = SceneCommand(type: SceneCommandType.delete, objectId: 'lamp_1', requiresConfirmation: true);
