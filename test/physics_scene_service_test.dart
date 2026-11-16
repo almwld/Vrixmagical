@@ -34,6 +34,22 @@ void main() {
       expect(physics.bodyCount, 1);
     });
 
+    test('supports sphere and capsule rigid-body colliders', () {
+      final transform = Matrix4.identity();
+      physics.addDynamicSphere(
+        id: 'sphere',
+        worldTransform: transform,
+        radius: 0.2,
+      );
+      physics.addDynamicCapsule(
+        id: 'capsule',
+        worldTransform: transform,
+        radius: 0.15,
+        halfHeight: 0.35,
+      );
+      expect(physics.bodyCount, 2);
+    });
+
     test('bounds fixed-step catch-up after long frames', () {
       expect(physics.advance(1 / 30), 2);
       expect(physics.advance(10), 5);
@@ -42,6 +58,14 @@ void main() {
     test('rejects invalid time, collider dimensions and material values', () {
       final transform = Matrix4.identity();
       expect(() => physics.advance(double.nan), throwsArgumentError);
+      expect(
+        () => physics.addDynamicSphere(
+          id: 'bad-radius',
+          worldTransform: transform,
+          radius: double.infinity,
+        ),
+        throwsArgumentError,
+      );
       expect(
         () => physics.addDynamicBox(
           id: 'bad-size',
