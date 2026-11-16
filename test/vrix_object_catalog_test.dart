@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:virxmagical/domain/vrix_object.dart';
 import 'package:virxmagical/services/object_library_catalog.dart';
@@ -125,4 +127,52 @@ void main() {
           throwsFormatException);
     });
   });
+
+  group('ObjectLibraryStore', () {
+    test('imports GLB files into persistent storage and reloads the manifest',
+        () async {
+      final root = await Directory.systemTemp.createTemp('vrix-library-');
+      try {
+        await File('${root.path}/object_library.json').writeAsString(
+          '{"schemaVersion":1,"assets":[]}',
+        );
+        final source = File('${root.path}/table.glb');
+        await source.writeAsBytes([0x67, 0x6c, 0x54, 0x46]);
+
+        final store = await ObjectLibraryStore.open(supportDirectory: root);
+        final imported = await store.importModel(source.path);
+        expect(imported.object.source, ObjectSource.imported);
+        expect(imported.object.meshPath, startsWith('models/imported/'));
+        expect(
+          await File('${root.path}/${imported.object.meshPath}').exists(),
+          isTrue,
+        );
+
+        final restored = await ObjectLibraryStore.open(supportDirectory: root);
+        expect(restored.catalog.assets, hasLength(1));
+        expect(restored.catalog.assets.single.object.id, imported.object.id);
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
+    test('rejects unsupported import extensions', () async {
+      final root = await Directory.systemTemp.createTemp('vrix-library-invalid-');
+      try {
+        await File('${root.path}/object_library.json').writeAsString(
+          '{"schemaVersion":1,"assets":[]}',
+        );
+        final source = File('${root.path}/image.png');
+        await source.writeAsBytes([1, 2, 3]);
+        final store = await ObjectLibraryStore.open(supportDirectory: root);
+        await expectLater(
+          store.importModel(source.path),
+          throwsFormatException,
+        );
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+  });
+
 }
