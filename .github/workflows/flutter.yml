@@ -67,3 +67,34 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Verify Jolt native library in debug APK
+        run: |
+          unzip -Z1 build/app/outputs/flutter-apk/app-debug.apk | tee /tmp/debug-apk-files.txt
+          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\\.so /tmp/debug-apk-files.txt
+
+      - name: Android release APK
+        run: flutter build apk --release
+
+      - name: Verify Jolt native library in release APK
+        run: |
+          unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
+          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\\.so /tmp/release-apk-files.txt
+
+      - name: Android release App Bundle
+        run: flutter build appbundle --release
+
+      - name: Verify Jolt native library in release bundle
+        run: |
+          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
+          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\\.so /tmp/release-aab-files.txt
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-release-apk-and-aab
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
