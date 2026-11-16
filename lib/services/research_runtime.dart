@@ -279,6 +279,53 @@ class SceneCommandParser {
   }
 }
 
+
+/// In-memory scene identity owner. Persistence is intentionally delegated to
+/// the app's storage layer; IDs remain stable across renderer/physics adapters.
+class SceneObjectRegistry {
+  final Map<String, SceneObject> _objects = {};
+  Iterable<SceneObject> get objects => List.unmodifiable(_objects.values);
+  SceneObject? operator [](String id) => _objects[id];
+
+  void register(SceneObject object) {
+    if (object.id.trim().isEmpty) throw ArgumentError('Scene object id cannot be empty.');
+    if (_objects.containsKey(object.id)) throw StateError('Scene object already exists: ${object.id}');
+    _objects[object.id] = object;
+  }
+
+  bool apply(SceneCommand command, {bool confirmed = false}) {
+    final object = _objects[command.objectId];
+    if (object == null) return false;
+    if (command.requiresConfirmation && !confirmed) return false;
+    switch (command.type) {
+      case SceneCommandType.select:
+        return true;
+      case SceneCommandType.move:
+        if (command.position == null) return false;
+        _objects[object.id] = object.copyWith(position: command.position);
+      case SceneCommandType.hide:
+        _objects[object.id] = object.copyWith(visible: false);
+      case SceneCommandType.show:
+        _objects[object.id] = object.copyWith(visible: true);
+      case SceneCommandType.duplicate:
+        final duplicateId = '${object.id}_copy';
+        if (_objects.containsKey(duplicateId)) return false;
+        _objects[duplicateId] = SceneObject(
+          id: duplicateId,
+          position: object.position,
+          rotation: object.rotation,
+          scale: object.scale,
+          visible: object.visible,
+        );
+      case SceneCommandType.delete:
+        _objects.remove(object.id);
+    }
+    return true;
+  }
+
+  void clear() => _objects.clear();
+}
+
 /// Safe segmentation contract: an EdgeSAM implementation can be injected only
 /// after the native ONNX runtime and verified model artifacts are present.
 abstract interface class PromptSegmentationBackend {
