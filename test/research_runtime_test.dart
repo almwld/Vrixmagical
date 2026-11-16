@@ -75,6 +75,19 @@ void main() {
     });
   });
 
+  test('scene registry enforces identity and consequential-action confirmation', () {
+    final registry = SceneObjectRegistry();
+    registry.register(const SceneObject(id: 'lamp_1', position: Vec3.zero()));
+    expect(() => registry.register(const SceneObject(id: 'lamp_1', position: Vec3.zero())), throwsStateError);
+    expect(registry.apply(const SceneCommand(type: SceneCommandType.hide, objectId: 'lamp_1')), isTrue);
+    expect(registry['lamp_1']!.visible, isFalse);
+    const delete = SceneCommand(type: SceneCommandType.delete, objectId: 'lamp_1', requiresConfirmation: true);
+    expect(registry.apply(delete), isFalse);
+    expect(registry['lamp_1'], isNotNull);
+    expect(registry.apply(delete, confirmed: true), isTrue);
+    expect(registry['lamp_1'], isNull);
+  });
+
   test('capability report does not claim unimplemented native features', () {
     const capabilities = ResearchRuntimeCapabilities();
     expect(capabilities.edgeSam.state, RuntimeCapabilityState.fallback);
