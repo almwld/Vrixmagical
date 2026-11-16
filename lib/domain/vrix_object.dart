@@ -19,9 +19,9 @@ class VrixTransform {
   final List<double> scale;
 
   factory VrixTransform.fromJson(Map<String, dynamic> json) => VrixTransform(
-        position: _readVector(json['position'], 3, 'position'),
-        rotation: _readVector(json['rotation'], 4, 'rotation'),
-        scale: _readVector(json['scale'], 3, 'scale'),
+        position: _readVector(json['position'], 3, 'position', fallback: const [0, 0, 0]),
+        rotation: _readVector(json['rotation'], 4, 'rotation', fallback: const [0, 0, 0, 1]),
+        scale: _readVector(json['scale'], 3, 'scale', fallback: const [1, 1, 1]),
       );
 
   Map<String, dynamic> toJson() => {
