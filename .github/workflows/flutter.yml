@@ -29,7 +29,8 @@ jobs:
       - name: Verify native SplatKit dependency
         run: |
           cd android
-          ./gradlew :app:dependencyInsight --dependency splatkit-android --configuration debugCompileClasspath
+          ./gradlew :app:dependencyInsight --dependency splatkit-android --configuration debugCompileClasspath | tee /tmp/splatkit-dependency.txt
+          grep -F 'io.github.xget7:splatkit-android:0.1.0-beta.3' /tmp/splatkit-dependency.txt
 
       - name: Bundle pinned MediaPipe models
         run: dart run mediapipe_core:bundle_models
