@@ -54,6 +54,89 @@ void main() {
     });
   });
 
+  group('AABB collision solver', () {
+    test('keeps a falling body above a static floor', () {
+      final physics = FixedStepPhysics();
+      physics.addBody(PhysicsBody(objectId: 'floor', position: const Vec3(0, -.5, 0)));
+      physics.addCollider(const Collider(
+        objectId: 'floor',
+        halfExtents: Vec3(5, .5, 5),
+        isStatic: true,
+        restitution: 0,
+      ));
+      physics.addBody(PhysicsBody(objectId: 'box', position: const Vec3(0, 1, 0)));
+      physics.addCollider(const Collider(
+        objectId: 'box',
+        halfExtents: Vec3(.5, .5, .5),
+        restitution: 0,
+      ));
+
+      for (var i = 0; i < 180; i++) {
+        physics.advance(1 / 60);
+      }
+      final box = physics.bodies.firstWhere((body) => body.objectId == 'box');
+      expect(box.position.y, greaterThanOrEqualTo(.49));
+      expect(box.velocity.y.abs(), lessThan(.05));
+    });
+
+    test('resolves a head-on collision between equal dynamic bodies', () {
+      final physics = FixedStepPhysics(gravity: Vec3.zero(), solverIterations: 2);
+      physics.addBody(PhysicsBody(
+        objectId: 'left',
+        position: const Vec3(-.6, 0, 0),
+        velocity: const Vec3(1, 0, 0),
+      ));
+      physics.addBody(PhysicsBody(
+        objectId: 'right',
+        position: const Vec3(.6, 0, 0),
+        velocity: const Vec3(-1, 0, 0),
+      ));
+      physics.addCollider(const Collider(
+        objectId: 'left',
+        halfExtents: Vec3(.5, .5, .5),
+        restitution: 1,
+        friction: 0,
+      ));
+      physics.addCollider(const Collider(
+        objectId: 'right',
+        halfExtents: Vec3(.5, .5, .5),
+        restitution: 1,
+        friction: 0,
+      ));
+
+      physics.advance(1 / 60);
+      final left = physics.bodies.firstWhere((body) => body.objectId == 'left');
+      final right = physics.bodies.firstWhere((body) => body.objectId == 'right');
+      expect(left.velocity.x, lessThan(0));
+      expect(right.velocity.x, greaterThan(0));
+    });
+
+    test('rejects invalid or orphaned colliders and removes them with bodies', () {
+      final physics = FixedStepPhysics();
+      expect(
+        () => physics.addCollider(const Collider(
+          objectId: 'missing',
+          halfExtents: Vec3.one(),
+        )),
+        throwsStateError,
+      );
+      physics.addBody(PhysicsBody(objectId: 'box', position: Vec3.zero()));
+      expect(
+        () => physics.addCollider(const Collider(
+          objectId: 'box',
+          halfExtents: Vec3(0, 1, 1),
+        )),
+        throwsArgumentError,
+      );
+      physics.addCollider(const Collider(
+        objectId: 'box',
+        halfExtents: Vec3.one(),
+      ));
+      physics.removeBody('box');
+      expect(physics.colliders, isEmpty);
+    });
+  });
+
   group('capture and constrained scene commands', () {
     test('capture manifest enforces pose shape and monotonic timestamps', () {
       final manifest = CaptureManifest(sessionId: 'session-1');
