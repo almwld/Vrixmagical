@@ -47,6 +47,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
   PhysicsSceneService? _physics;
   Timer? _physicsTimer;
   DateTime? _lastPhysicsFrame;
+  DateTime? _lastArSync;
   final List<_PlacedAsset> _placed = [];
   final Set<String> _manuallyControlledNodes = <String>{};
   String _status = 'بانتظار تهيئة الواقع المعزز…';
@@ -126,6 +127,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
   void _startPhysicsTicker() {
     if (_physics == null || _physicsTimer != null) return;
     _lastPhysicsFrame = DateTime.now();
+    _lastArSync = null;
     _physicsTimer = Timer.periodic(
       const Duration(milliseconds: 16),
       (_) => _advancePhysics(),
@@ -136,6 +138,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     _physicsTimer?.cancel();
     _physicsTimer = null;
     _lastPhysicsFrame = null;
+    _lastArSync = null;
   }
 
   void _advancePhysics() {
@@ -150,8 +153,15 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       physics.advance(
         now.difference(previous).inMicroseconds / Duration.microsecondsPerSecond,
       );
-      // Drain native events every frame so contact buffers cannot accumulate.
+      // Drain native events every physics frame so native buffers cannot grow.
       physics.drainEvents();
+      // ARNode writes cross a platform channel; cap renderer sync to 30 Hz.
+      final lastSync = _lastArSync;
+      if (lastSync != null &&
+          now.difference(lastSync) < const Duration(milliseconds: 33)) {
+        return;
+      }
+      _lastArSync = now;
       final activeTransforms = physics.activeBodyTransforms();
       for (final asset in _placed) {
         if (_manuallyControlledNodes.contains(asset.node.name)) continue;
@@ -163,11 +173,14 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         final localRotation = Quaternion.identity();
         final localScale = Vector3.zero();
         localTransform.decompose(localPosition, localRotation, localScale);
-        asset.node.transform = Matrix4.compose(
+        final renderTransform = Matrix4.compose(
           localPosition,
           localRotation,
           asset.node.scale,
         );
+        if (_matricesDiffer(asset.node.transform, renderTransform)) {
+          asset.node.transform = renderTransform;
+        }
       }
     } catch (error) {
       _stopPhysicsTicker();
@@ -176,6 +189,15 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         setState(() => _status = 'توقفت محاكاة الفيزياء لحماية المشهد: $error');
       }
     }
+  }
+
+  bool _matricesDiffer(Matrix4 current, Matrix4 next) {
+    for (var i = 0; i < 16; i++) {
+      if ((current.storage[i] - next.storage[i]).abs() > 1e-4) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void _onNodeInteractionStart(String nodeName) {
