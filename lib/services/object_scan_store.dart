@@ -15,6 +15,7 @@ class ObjectScanView {
     this.maskWidth,
     this.maskHeight,
     this.cameraPose,
+    this.cameraPoseSynchronized = false,
     required this.promptX,
     required this.promptY,
     DateTime? capturedAt,
@@ -26,8 +27,10 @@ class ObjectScanView {
   final int height;
   final int? maskWidth;
   final int? maskHeight;
-  /// Column-major 4x4 AR world-from-camera transform (16 finite values).
+  /// Candidate column-major world-from-camera transform (16 finite values).
+  /// It is trusted for reconstruction only when [cameraPoseSynchronized] is true.
   final List<double>? cameraPose;
+  final bool cameraPoseSynchronized;
   final double promptX;
   final double promptY;
   final DateTime capturedAt;
@@ -141,7 +144,13 @@ class ObjectScanStore {
         'maskHeight': view.maskHeight,
         'capturedAt': view.capturedAt.toUtc().toIso8601String(),
         'prompt': {'x': view.promptX, 'y': view.promptY},
-        'cameraPose': view.cameraPose,
+        // Legacy getCameraPose() and PixelCopy are separate calls. Never
+        // expose this candidate as calibrated reconstruction input.
+        'cameraPose': view.cameraPoseSynchronized ? view.cameraPose : null,
+        'cameraPoseCandidate': view.cameraPose,
+        'cameraPoseStatus': view.cameraPose == null
+            ? 'unavailable'
+            : (view.cameraPoseSynchronized ? 'synchronized' : 'unverified-unsynchronized'),
         'cameraPoseConvention': view.cameraPose == null ? null : 'column-major-world-from-camera-meters',
         'depthMap': null,
       });
