@@ -40,7 +40,10 @@ Captured photos and masks remain in app-private storage. No scan uploads are per
 - `lib/domain/captured_frame.dart` defines the immutable-by-contract RGB-D frame boundary, depth capability state, stream-specific intrinsics and strict timestamp equality.
 - Frame validation rejects paused/stopped tracking, malformed intrinsics, non-finite data, non-affine poses, non-orthonormal rotations and depth/RGB timestamp mismatches.
 - `DepthAligner` projects lower-resolution depth samples into RGB pixel coordinates using separate depth/RGB intrinsics and a nearest-surface z-buffer; it carries confidence through registration.
-- `MaskedPointCloudBuilder` filters by segmentation mask, confidence, depth range and pixel stride, then back-projects points through the world-from-camera pose.
+- `SegmentationMaskAligner` maps the lower-resolution segmenter output to the RGB grid using nearest-neighbor sampling.
+- `MaskedPointCloudBuilder` filters by aligned segmentation mask, confidence, depth range and pixel stride, then back-projects points through the world-from-camera pose.
+- `PointCloudVoxelFusion` performs bounded world-space voxel centroid reduction (default 1 cm); it is a point-cloud reducer, not a mesh reconstruction algorithm.
+- Non-zero RGB image rotation is rejected until the native bridge provides an explicit image/depth registration transform.
 - Unit tests cover timestamp synchronization, pose orthonormality, intrinsics, tracking state, depth registration, confidence rejection and point-cloud projection.
 
 These are implemented Dart contracts and deterministic processing primitives. They do **not** mean the Android bridge is already connected: the app still needs the maintained native plugin fork and the ARCore device probe before any depth-backed scan can be claimed.
