@@ -191,8 +191,9 @@ void main() {
         id: 'impulse-ball',
         worldTransform: Matrix4.identity(),
         radius: 0.15,
+        mass: 0.5,
       );
-      physics.applyImpulse('impulse-ball', Vector3(0, 1, 0));
+      physics.applyImpulse('impulse-ball', Vector3(0, 3, 0));
       physics.addForce('impulse-ball', Vector3(1, 0, 0));
       for (var i = 0; i < 30; i++) {
         physics.advance(1 / 60);
