@@ -170,6 +170,38 @@ void main() {
       expect(physics.bodyCount, 2);
     });
 
+    test('supports kinematic motion, impulses and force application', () {
+      physics.addKinematicBox(
+        id: 'moving-platform',
+        worldTransform: Matrix4.identity(),
+        halfExtents: Vector3(0.5, 0.05, 0.5),
+      );
+      physics.moveKinematic(
+        'moving-platform',
+        Matrix4.identity()..setTranslation(Vector3(1, 0, 0)),
+        deltaSeconds: 1 / 60,
+      );
+      physics.advance(1 / 60);
+      expect(
+        physics.bodyWorldTransform('moving-platform').getTranslation().x,
+        closeTo(1, 0.05),
+      );
+
+      physics.addDynamicSphere(
+        id: 'impulse-ball',
+        worldTransform: Matrix4.identity(),
+        radius: 0.15,
+      );
+      physics.applyImpulse('impulse-ball', Vector3(0, 1, 0));
+      physics.addForce('impulse-ball', Vector3(1, 0, 0));
+      for (var i = 0; i < 30; i++) {
+        physics.advance(1 / 60);
+      }
+      final moved = physics.bodyWorldTransform('impulse-ball').getTranslation();
+      expect(moved.y, greaterThan(0.05));
+      expect(moved.x, greaterThan(0));
+    });
+
     test('bounds fixed-step catch-up after long frames', () {
       expect(physics.advance(1 / 30), 2);
       expect(physics.advance(10), 5);
