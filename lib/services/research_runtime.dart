@@ -249,8 +249,12 @@ class FixedStepPhysics {
     if (!deltaSeconds.isFinite || deltaSeconds < 0) {
       throw ArgumentError.value(deltaSeconds, 'deltaSeconds');
     }
-    if (!stepSeconds.isFinite || stepSeconds <= 0 || maxSubSteps < 1 || solverIterations < 1) {
-      throw StateError('Physics step and iteration limits must be positive.');
+    if (!_isFiniteVec3(gravity) ||
+        !stepSeconds.isFinite ||
+        stepSeconds <= 0 ||
+        maxSubSteps < 1 ||
+        solverIterations < 1) {
+      throw StateError('Gravity, physics step and iteration limits must be finite and positive.');
     }
     _accumulator += math.min(deltaSeconds, stepSeconds * maxSubSteps).toDouble();
     var steps = 0;
