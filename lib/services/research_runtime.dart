@@ -76,7 +76,7 @@ class TwoHandTransform {
 
   Vec3 applyScale(Vec3 initialScale, double initialDistance) {
     if (!initialDistance.isFinite || initialDistance <= 1e-5) return initialScale;
-    final factor = (distance / initialDistance).clamp(.1, 10.0);
+    final factor = (distance / initialDistance).clamp(.1, 10.0).toDouble();
     return initialScale * factor;
   }
 }
@@ -193,7 +193,7 @@ class FixedStepPhysics {
 
   int advance(double deltaSeconds) {
     if (!deltaSeconds.isFinite || deltaSeconds < 0) throw ArgumentError.value(deltaSeconds, 'deltaSeconds');
-    _accumulator += math.min(deltaSeconds, stepSeconds * maxSubSteps);
+    _accumulator += math.min(deltaSeconds, stepSeconds * maxSubSteps).toDouble();
     var steps = 0;
     while (_accumulator >= stepSeconds && steps < maxSubSteps) {
       for (final body in _bodies.values) {
