@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../studio/studio_screen.dart';
 import '../library/object_library_screen.dart';
 import '../settings/settings_screen.dart';
@@ -92,7 +92,7 @@ class _HeroCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF173B49), Color(0xFF17213D), Color(0xFF111827)]),
-        border: Border.all(color: const Color(0xFF3DDCCB).withOpacity(.25)),
+        border: Border.all(color: const Color(0xFF3DDCCB).withValues(alpha: .25)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Row(children: [

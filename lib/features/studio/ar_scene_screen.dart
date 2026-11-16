@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_reality/ar_flutter_plugin.dart';
 import 'package:flutter_reality/datatypes/config_planedetection.dart';
 import 'package:flutter_reality/datatypes/node_types.dart';

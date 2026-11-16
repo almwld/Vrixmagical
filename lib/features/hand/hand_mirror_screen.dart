@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 
 import 'hand_gesture_math.dart';
@@ -222,7 +222,7 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
                     decoration: BoxDecoration(
                       color: const Color(0xE6111B2A),
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0xFF3DDCCB).withOpacity(.35)),
+                      border: Border.all(color: const Color(0xFF3DDCCB).withValues(alpha: .35)),
                     ),
                     child: Text(_status, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600)),
                   ),
@@ -245,7 +245,7 @@ class _DigitalAsset extends StatelessWidget {
       color: const Color(0xDD102B39),
       borderRadius: BorderRadius.circular(24),
       border: Border.all(color: isHeld ? const Color(0xFF6BFFE9) : const Color(0xFF45BFB4), width: isHeld ? 3 : 1.5),
-      boxShadow: [BoxShadow(color: const Color(0xFF42E8D5).withOpacity(isHeld ? .35 : .12), blurRadius: isHeld ? 24 : 10)],
+      boxShadow: [BoxShadow(color: const Color(0xFF42E8D5).withValues(alpha: isHeld ? .35 : .12), blurRadius: isHeld ? 24 : 10)],
     ),
     child: Icon(Icons.local_cafe_rounded, size: 39, color: isHeld ? const Color(0xFF8FFFF0) : const Color(0xFF55E3D4)),
   );

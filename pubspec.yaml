@@ -3,13 +3,14 @@ description: Android-first hybrid Digital Reality Engine with ARCore and on-devi
 publish_to: "none"
 version: 0.2.0+2
 environment:
-  sdk: ">=3.4.0 <4.0.0"
+  sdk: ">=3.13.0 <4.0.0"
 dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
   camera: ^0.12.2
   flutter_reality: ^0.1.0
+  material_ui: ^1.11.0
   file_picker: ^13.3.3
   path_provider: ^2.1.5
   mediapipe_vision: ^0.3.0

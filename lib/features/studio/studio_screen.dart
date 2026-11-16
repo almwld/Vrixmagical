@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../hand/hand_mirror_screen.dart';
 import '../perception/scene_analysis_screen.dart';
 import '../reconstruction/gaussian_splat_screen.dart';
