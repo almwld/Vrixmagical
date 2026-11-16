@@ -19,7 +19,7 @@ The existing plugin's `getCameraPose()` implementation performs a one-shot `sess
 
 ## Explicitly not yet implemented
 
-This remains a calibrated multi-view RGB + mask capture dataset, not a reconstructed 3D object. The manifest intentionally records `depthMap: null` and reconstruction status `not_started`.
+This remains a multi-view RGB + mask capture dataset with unverified legacy pose candidates, not a calibrated reconstruction dataset or reconstructed 3D object. The manifest intentionally records `depthMap: null` and reconstruction status `not_started`.
 
 The next integration must:
 1. Maintain a VRIX fork of `flutter_reality` and extend its existing native `ArView.onFrame` callback to export camera pose, camera intrinsics, tracking state, timestamp and depth/confidence images from the **same ARCore frame**; avoid a second camera/session or a second `session.update()`.
