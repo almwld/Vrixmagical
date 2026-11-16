@@ -12,8 +12,11 @@ Float64List identityPose() => Float64List.fromList([
     ]);
 
 CapturedFrame makeFrame({
+  int frameTimestamp = 42,
   int rgbTimestamp = 42,
-  int depthTimestamp = 42,
+  int depthFrameTimestamp = 42,
+  int depthImageTimestamp = 40,
+  bool depthReprojected = true,
   Float64List? pose,
   double fx = 2,
   int imageRotationDegrees = 0,
@@ -28,6 +31,7 @@ CapturedFrame makeFrame({
   );
   return CapturedFrame(
     rgbBytes: Uint8List.fromList([1, 2, 3]),
+    frameTimestampNs: frameTimestamp,
     rgbTimestampNs: rgbTimestamp,
     rgbIntrinsics: CameraIntrinsics(
       fx: fx,
@@ -45,7 +49,9 @@ CapturedFrame makeFrame({
       confidence: Uint8List.fromList([255, 255, 255, 255]),
       width: 2,
       height: 2,
-      timestampNs: depthTimestamp,
+      frameTimestampNs: depthFrameTimestamp,
+      imageTimestampNs: depthImageTimestamp,
+      isReprojected: depthReprojected,
       intrinsics: depthIntrinsics,
     ),
     imageRotationDegrees: imageRotationDegrees,
@@ -54,18 +60,31 @@ CapturedFrame makeFrame({
 
 void main() {
   group('CapturedFrame contract', () {
-    test('accepts a synchronized RGB-D frame with a rigid identity pose', () {
+    test('accepts synchronized frame data with a rigid identity pose', () {
       expect(
         () => makeFrame().validate(requireDepth: true),
         returnsNormally,
       );
     });
 
-    test('rejects RGB and depth from different ARCore frames', () {
+    test('rejects depth acquired from a different ARCore frame callback', () {
       expect(
-        () => makeFrame(rgbTimestamp: 42, depthTimestamp: 43)
+        () => makeFrame(frameTimestamp: 42, depthFrameTimestamp: 43)
             .validate(requireDepth: true),
         throwsFormatException,
+      );
+    });
+
+    test('accepts an older raw-depth image timestamp when reprojected into this frame', () {
+      expect(
+        () => makeFrame(
+          frameTimestamp: 100,
+          rgbTimestamp: 99,
+          depthFrameTimestamp: 100,
+          depthImageTimestamp: 80,
+          depthReprojected: true,
+        ).validate(requireDepth: true),
+        returnsNormally,
       );
     });
 
@@ -95,6 +114,7 @@ void main() {
       final captured = makeFrame();
       final paused = CapturedFrame(
         rgbBytes: captured.rgbBytes,
+        frameTimestampNs: captured.frameTimestampNs,
         rgbTimestampNs: captured.rgbTimestampNs,
         rgbIntrinsics: captured.rgbIntrinsics,
         cameraPose: captured.cameraPose,
