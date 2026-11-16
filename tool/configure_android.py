@@ -7,10 +7,10 @@ if not gradle.exists():
 text = gradle.read_text()
 text = text.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36")
 text = text.replace("minSdk = flutter.minSdkVersion", "minSdk = 29")
-if 'implementation("io.github.xget7:splatkit-android:0.1.0-beta.3")' not in text:
+if 'implementation("io.github.xget7:splatkit-android:0.1.0-beta.1")' not in text:
     text = text.replace(
         "dependencies {",
-        'dependencies {\n    implementation("io.github.xget7:splatkit-android:0.1.0-beta.3")',
+        'dependencies {\n    implementation("io.github.xget7:splatkit-android:0.1.0-beta.1")',
         1,
     )
 if "abiFilters" not in text:
