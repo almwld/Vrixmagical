@@ -173,7 +173,7 @@ class ObjectScanStore {
 
   Future<void> _writeManifest() async {
     final payload = <String, Object?>{
-      'schemaVersion': 1,
+      'schemaVersion': 2,
       'id': id,
       'displayName': displayName,
       'source': 'captured',
@@ -185,7 +185,7 @@ class ObjectScanStore {
       'reconstruction': {
         'status': 'not_started',
         'output': null,
-        'note': 'RGB views and masks only; calibrated camera poses and depth are not yet available.',
+        'note': 'RGB views and masks only. Legacy pose candidates are explicitly unverified because pose and PixelCopy snapshot are separate calls. Synchronized RGB-D frames are required before reconstruction.',
       },
       'views': _views,
     };
