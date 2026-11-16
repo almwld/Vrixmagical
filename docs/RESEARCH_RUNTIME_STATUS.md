@@ -25,7 +25,7 @@ The runtime uses the standalone Jolt FFI package rather than a renderer-coupled 
 - The sample Duck model uses a manually approximated box collider. Imported model collider metadata and automatic convex decomposition are not yet implemented.
 - A tapped AR plane is represented by a finite static box. Plane extent estimation, tracked-plane updates and anchor-loss recovery still need device-level validation.
 - The AR bridge converts body poses into anchor-local matrices. Tracking drift, anchor relocalization and interaction races need real-device tests.
-- Transform hand-off currently recreates an unjointed body to teleport it and clears its velocity. Teleporting a body connected to a joint is rejected to avoid silently invalidating the constraint graph.
+- Transform hand-off uses Jolt's body interface to update position/rotation in place, preserving connected joints. Velocity is reset by default after a user drag.
 - Soft bodies, fluids, AR depth occlusion and scene reconstruction remain separate unimplemented systems.
 
 ## Required production acceptance gates
