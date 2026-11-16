@@ -946,8 +946,12 @@ class PhysicsSceneService {
         ..motorTarget = motorTarget
         ..springFrequency = springFrequency
         ..springDamping = springDamping;
-      _writeVector(settings.ref.pointA, anchorA);
-      _writeVector(settings.ref.pointB, anchorB);
+      settings.ref.pointA[0] = anchorA.x;
+      settings.ref.pointA[1] = anchorA.y;
+      settings.ref.pointA[2] = anchorA.z;
+      settings.ref.pointB[0] = anchorB.x;
+      settings.ref.pointB[1] = anchorB.y;
+      settings.ref.pointB[2] = anchorB.z;
       final normalizedAxis = Vector3.copy(jointAxis)..normalize();
       final normalizedNormal = Vector3.copy(jointNormal)..normalize();
       if (normalizedAxis.dot(normalizedNormal).abs() > 0.999) {
@@ -956,8 +960,12 @@ class PhysicsSceneService {
       normalizedNormal
         ..sub(normalizedAxis * normalizedAxis.dot(normalizedNormal))
         ..normalize();
-      _writeVector(settings.ref.axis, normalizedAxis);
-      _writeVector(settings.ref.normal, normalizedNormal);
+      settings.ref.axis[0] = normalizedAxis.x;
+      settings.ref.axis[1] = normalizedAxis.y;
+      settings.ref.axis[2] = normalizedAxis.z;
+      settings.ref.normal[0] = normalizedNormal.x;
+      settings.ref.normal[1] = normalizedNormal.y;
+      settings.ref.normal[2] = normalizedNormal.z;
       return jolt.jj_joint_create(_world, a.handle, b?.handle ?? 0, settings);
     });
     if (handle == 0) throw StateError('Jolt could not create joint $id.');
@@ -1146,7 +1154,7 @@ class PhysicsSceneService {
       throw ArgumentError('Physics transforms must contain only finite values.');
     }
     final position = matrix.getTranslation();
-    final rotation = matrix.getRotation();
+    final rotation = Quaternion.fromRotation(matrix.getRotation());
     final length = math.sqrt(
       rotation.x * rotation.x +
           rotation.y * rotation.y +
