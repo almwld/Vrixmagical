@@ -12,6 +12,9 @@ class ObjectScanView {
     required this.maskPng,
     required this.width,
     required this.height,
+    this.maskWidth,
+    this.maskHeight,
+    this.cameraPose,
     required this.promptX,
     required this.promptY,
     DateTime? capturedAt,
@@ -21,6 +24,10 @@ class ObjectScanView {
   final List<int> maskPng;
   final int width;
   final int height;
+  final int? maskWidth;
+  final int? maskHeight;
+  /// Column-major 4x4 AR world-from-camera transform (16 finite values).
+  final List<double>? cameraPose;
   final double promptX;
   final double promptY;
   final DateTime capturedAt;
@@ -28,6 +35,14 @@ class ObjectScanView {
   void validate() {
     if (width < 1 || height < 1 || width > 12000 || height > 12000) {
       throw const FormatException('Scan image dimensions are invalid.');
+    }
+    if ((maskWidth != null && (maskWidth! < 1 || maskWidth! > 12000)) ||
+        (maskHeight != null && (maskHeight! < 1 || maskHeight! > 12000))) {
+      throw const FormatException('Scan mask dimensions are invalid.');
+    }
+    if (cameraPose != null &&
+        (cameraPose!.length != 16 || cameraPose!.any((value) => !value.isFinite))) {
+      throw const FormatException('AR camera pose must be a finite 4x4 matrix.');
     }
     if (maskPng.length < 8) {
       throw const FormatException('A non-empty PNG foreground mask is required.');
@@ -122,9 +137,12 @@ class ObjectScanStore {
         'mask': maskName,
         'width': view.width,
         'height': view.height,
+        'maskWidth': view.maskWidth,
+        'maskHeight': view.maskHeight,
         'capturedAt': view.capturedAt.toUtc().toIso8601String(),
         'prompt': {'x': view.promptX, 'y': view.promptY},
-        'cameraPose': null,
+        'cameraPose': view.cameraPose,
+        'cameraPoseConvention': view.cameraPose == null ? null : 'column-major-world-from-camera-meters',
         'depthMap': null,
       });
       await _writeManifest();
