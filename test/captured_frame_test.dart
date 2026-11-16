@@ -11,20 +11,30 @@ Float64List identityPose() => Float64List.fromList([
       0, 0, 0, 1,
     ]);
 
-CapturedFrame frame({
+CapturedFrame makeFrame({
   int rgbTimestamp = 42,
   int depthTimestamp = 42,
   Float64List? pose,
   double fx = 2,
 }) {
-  final depthIntrinsics = const CameraIntrinsics(
-    fx: 1, fy: 1, cx: .5, cy: .5, width: 2, height: 2,
+  const depthIntrinsics = CameraIntrinsics(
+    fx: 1,
+    fy: 1,
+    cx: .5,
+    cy: .5,
+    width: 2,
+    height: 2,
   );
   return CapturedFrame(
     rgbBytes: Uint8List.fromList([1, 2, 3]),
     rgbTimestampNs: rgbTimestamp,
     rgbIntrinsics: CameraIntrinsics(
-      fx: fx, fy: fx, cx: 1, cy: 1, width: 4, height: 4,
+      fx: fx,
+      fy: fx,
+      cx: 1,
+      cy: 1,
+      width: 4,
+      height: 4,
     ),
     cameraPose: pose ?? identityPose(),
     trackingState: VrixTrackingState.tracking,
@@ -43,27 +53,37 @@ CapturedFrame frame({
 void main() {
   group('CapturedFrame contract', () {
     test('accepts a synchronized RGB-D frame with a rigid identity pose', () {
-      expect(() => frame().validate(requireDepth: true), returnsNormally);
+      expect(
+        () => makeFrame().validate(requireDepth: true),
+        returnsNormally,
+      );
     });
 
     test('rejects RGB and depth from different ARCore frames', () {
       expect(
-        () => frame(rgbTimestamp: 42, depthTimestamp: 43).validate(requireDepth: true),
+        () => makeFrame(rgbTimestamp: 42, depthTimestamp: 43)
+            .validate(requireDepth: true),
         throwsFormatException,
       );
     });
 
     test('rejects non-orthonormal camera rotation', () {
       final invalid = identityPose()..[0] = 2;
-      expect(() => frame(pose: invalid).validate(), throwsFormatException);
+      expect(
+        () => makeFrame(pose: invalid).validate(),
+        throwsFormatException,
+      );
     });
 
     test('rejects non-positive focal length', () {
-      expect(() => frame(fx: 0).validate(), throwsFormatException);
+      expect(
+        () => makeFrame(fx: 0).validate(),
+        throwsFormatException,
+      );
     });
 
     test('rejects paused tracking frames', () {
-      final captured = frame();
+      final captured = makeFrame();
       final paused = CapturedFrame(
         rgbBytes: captured.rgbBytes,
         rgbTimestampNs: captured.rgbTimestampNs,
@@ -73,27 +93,30 @@ void main() {
         depthSupport: VrixDepthSupport.automatic,
         depth: captured.depth,
       );
-      expect(() => paused.validate(requireDepth: true), throwsFormatException);
+      expect(
+        () => paused.validate(requireDepth: true),
+        throwsFormatException,
+      );
     });
   });
 
   group('Depth alignment and point cloud', () {
-    test('projects depth samples into RGB pixel coordinates with confidence', () {
-      final captured = frame();
+    test('projects depth samples into RGB pixels and preserves confidence', () {
+      final captured = makeFrame();
       final aligned = const DepthAligner().alignDepthAndConfidence(
         captured.depth!,
         captured.rgbIntrinsics,
       );
       expect(aligned.values.length, 16);
-      expect(aligned.values[5], 1);
-      expect(aligned.values[7], 1);
-      expect(aligned.values[13], 1);
-      expect(aligned.values[15], 1);
-      expect(aligned.confidence[5], 255);
+      expect(aligned.values[0], 1);
+      expect(aligned.values[2], 1);
+      expect(aligned.values[8], 1);
+      expect(aligned.values[10], 1);
+      expect(aligned.confidence[0], 255);
     });
 
     test('backprojects masked depth into world-space points', () {
-      final captured = frame();
+      final captured = makeFrame();
       final mask = Uint8List(16)..fillRange(0, 16, 255);
       final points = const MaskedPointCloudBuilder().build(
         frame: captured,
@@ -106,10 +129,22 @@ void main() {
       expect(points.first.z, closeTo(-1, 1e-6));
     });
 
-    test('drops low-confidence depth samples before point-cloud fusion', () {\n      final captured = frame();\n      captured.depth!.confidence[0] = 10;\n      final points = const MaskedPointCloudBuilder().build(\n        frame: captured,\n        rgbMask: Uint8List(16)..fillRange(0, 16, 255),\n        pixelStride: 1,\n        minimumConfidence: .5,\n      );\n      expect(points.length, 3);\n    });\n\n    test('rejects masks that do not match RGB dimensions', () {
+    test('drops low-confidence samples before point-cloud fusion', () {
+      final captured = makeFrame();
+      captured.depth!.confidence[0] = 10;
+      final points = const MaskedPointCloudBuilder().build(
+        frame: captured,
+        rgbMask: Uint8List(16)..fillRange(0, 16, 255),
+        pixelStride: 1,
+        minimumConfidence: .5,
+      );
+      expect(points.length, 3);
+    });
+
+    test('rejects masks that do not match RGB dimensions', () {
       expect(
         () => const MaskedPointCloudBuilder().build(
-          frame: frame(),
+          frame: makeFrame(),
           rgbMask: Uint8List(4),
         ),
         throwsFormatException,
