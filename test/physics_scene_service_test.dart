@@ -50,7 +50,9 @@ void main() {
       expect(physics.bodyCount, 2);
     });
 
-    test('Jolt resolves rigid-body contact and buffers contact events', () {
+    test('Jolt resolves rigid-body contact and streams contact events', () async {
+      final streamedEvents = <PhysicsContactEvent>[];
+      final subscription = physics.events.listen(streamedEvents.add);
       physics.addStaticBox(
         id: 'ground',
         worldTransform: Matrix4.identity()
@@ -72,6 +74,8 @@ void main() {
       expect(settled.y, closeTo(0.2, 0.04));
       final events = physics.drainEvents();
       expect(events.any((event) => event.isContactBegin), isTrue);
+      expect(streamedEvents.any((event) => event.isContactBegin), isTrue);
+      await subscription.cancel();
     });
 
     test('batch reads active transforms and supports Jolt raycasts', () {
