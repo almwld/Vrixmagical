@@ -22,6 +22,8 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
   int _lastTimestamp = -1;
   int _frameNumber = 0;
   bool _starting = true;
+  bool _shuttingDown = false;
+  bool _frameBusy = false;
   bool _pinching = false;
   Offset? _indexPosition;
   Offset? _assetPosition;
@@ -85,29 +87,38 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
 
   void _onCameraFrame(CameraImage image) {
     final landmarker = _landmarker;
-    if (landmarker == null) return;
+    if (_shuttingDown || landmarker == null || _frameBusy) return;
     _frameNumber++;
     if (_frameNumber % 3 != 0) return;
 
+    _frameBusy = true;
     final now = _clock.elapsedMilliseconds;
     _lastTimestamp = now > _lastTimestamp ? now : _lastTimestamp + 1;
     final rotation = _camera?.description.sensorOrientation ?? 0;
-    landmarker.detectAsync(
-      VisionImage.deferred(
-        () => VisionImage.fromPixels(
-          pixels: _toRgba(image),
-          width: image.width,
-          height: image.height,
-          format: VisionPixelFormat.rgba,
+    try {
+      landmarker.detectAsync(
+        VisionImage.deferred(
+          () => VisionImage.fromPixels(
+            pixels: _toRgba(image),
+            width: image.width,
+            height: image.height,
+            format: VisionPixelFormat.rgba,
+          ),
         ),
-      ),
-      timestampMilliseconds: _lastTimestamp,
-      rotationDegrees: rotation,
-    );
+        timestampMilliseconds: _lastTimestamp,
+        rotationDegrees: rotation,
+      );
+    } catch (error) {
+      _frameBusy = false;
+      if (mounted) {
+        setState(() => _status = 'تعذّرت معالجة إطار الكاميرا: $error');
+      }
+    }
   }
 
   void _onHandResult(HandLandmarkerResult result) {
-    if (!mounted) return;
+    _frameBusy = false;
+    if (!mounted || _shuttingDown) return;
     if (result.handLandmarks.isEmpty) {
       setState(() {
         _pinching = false;
@@ -183,12 +194,33 @@ class _HandMirrorScreenState extends State<HandMirrorScreen> {
     return rgba;
   }
 
+  Future<void> _shutdown() async {
+    if (_shuttingDown) return;
+    _shuttingDown = true;
+    final camera = _camera;
+    final results = _results;
+    final landmarker = _landmarker;
+    _camera = null;
+    _results = null;
+    _landmarker = null;
+
+    if (camera != null) {
+      try {
+        if (camera.value.isStreamingImages) {
+          await camera.stopImageStream();
+        }
+      } catch (_) {
+        // Continue releasing the remaining camera and inference resources.
+      }
+    }
+    await results?.cancel();
+    await landmarker?.dispose();
+    await camera?.dispose();
+  }
+
   @override
   void dispose() {
-    _camera?.stopImageStream().catchError((_) {});
-    _results?.cancel();
-    _landmarker?.dispose();
-    _camera?.dispose();
+    unawaited(_shutdown());
     super.dispose();
   }
 
