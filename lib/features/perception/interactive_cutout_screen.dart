@@ -6,6 +6,8 @@ import 'package:camera/camera.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 
+import '../../app/app_theme.dart';
+
 class InteractiveCutoutScreen extends StatefulWidget {
   const InteractiveCutoutScreen({super.key});
 
@@ -238,85 +240,256 @@ class _InteractiveCutoutScreenState extends State<InteractiveCutoutScreen> {
     final camera = _camera;
     final photoPath = _photoPath;
     return Scaffold(
-      appBar: AppBar(title: const Text('العزل التفاعلي للأجسام')),
+      appBar: AppBar(
+        title: const Text('العزل التفاعلي'),
+        actions: [
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 16),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.secondary.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: const Text(
+                  'MAGIC TOUCH',
+                  style: TextStyle(
+                    color: AppColors.secondary,
+                    fontSize: 8,
+                    letterSpacing: .8,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
-            child: photoPath == null
-                ? (camera != null && camera.value.isInitialized
-                    ? CameraPreview(camera)
-                    : const Center(child: CircularProgressIndicator()))
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      final size = Size(constraints.maxWidth, constraints.maxHeight);
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapDown: (details) => _addPoint(details.localPosition, size),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Image.file(File(photoPath), fit: BoxFit.contain),
-                            if (_maskImage != null)
-                              RawImage(image: _maskImage, fit: BoxFit.contain),
-                            if (_busy)
-                              const Center(child: CircularProgressIndicator()),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(_status, style: const TextStyle(height: 1.5)),
-                  if (_error != null) ...[
-                    const SizedBox(height: 6),
-                    Text(_error!, style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 11)),
-                  ],
-                  const SizedBox(height: 12),
-                  if (photoPath == null)
-                    FilledButton.icon(
-                      onPressed: _busy ? null : _capture,
-                      icon: const Icon(Icons.camera_alt_outlined),
-                      label: const Text('التقاط صورة'),
-                    )
-                  else ...[
-                    Row(
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: photoPath == null
+                  ? Stack(
+                      fit: StackFit.expand,
                       children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _busy ? null : () => setState(() => _excludeMode = !_excludeMode),
-                            icon: Icon(_excludeMode ? Icons.remove_circle_outline : Icons.add_circle_outline),
-                            label: Text(_excludeMode ? 'وضع الاستبعاد' : 'وضع الإضافة'),
+                        if (camera != null && camera.value.isInitialized)
+                          CameraPreview(camera)
+                        else
+                          const Center(
+                            child: CircularProgressIndicator(
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        Positioned(
+                          top: 13,
+                          left: 13,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xDD101A28),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text(
+                              'CAMERA INPUT',
+                              style: TextStyle(
+                                color: AppColors.primary,
+                                fontSize: 8,
+                                letterSpacing: 1,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          tooltip: 'إعادة القناع',
-                          onPressed: _busy ? null : _resetSelection,
-                          icon: const Icon(Icons.restart_alt),
-                        ),
-                        IconButton(
-                          tooltip: 'التقاط صورة أخرى',
-                          onPressed: _busy ? null : _retake,
-                          icon: const Icon(Icons.camera_alt_outlined),
-                        ),
                       ],
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final size = Size(
+                          constraints.maxWidth,
+                          constraints.maxHeight,
+                        );
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapDown: (details) =>
+                              _addPoint(details.localPosition, size),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.file(File(photoPath), fit: BoxFit.contain),
+                              if (_maskImage != null)
+                                RawImage(
+                                  image: _maskImage,
+                                  fit: BoxFit.contain,
+                                ),
+                              Positioned(
+                                top: 13,
+                                left: 13,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 7,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xDD101A28),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: AppColors.primary.withValues(
+                                        alpha: .3,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    _excludeMode ? 'REMOVE REGION' : 'TAP TO SELECT',
+                                    style: const TextStyle(
+                                      color: AppColors.primary,
+                                      fontSize: 8,
+                                      letterSpacing: .8,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (_busy)
+                                const ColoredBox(
+                                  color: Color(0x66080D16),
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'عدد نقاط التحديد: ${_strokes.length} · المعالجة محلية على الجهاز',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF91A7BC)),
-                    ),
-                  ],
-                ],
+            ),
+          ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(18, 15, 18, 19),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
               ),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: AppColors.primary,
+                      size: 19,
+                    ),
+                    const SizedBox(width: 9),
+                    const Expanded(
+                      child: Text(
+                        'تحديد ذكي متعدد النقاط',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                    if (photoPath != null)
+                      Text(
+                        '${_strokes.length} نقطة',
+                        style: const TextStyle(
+                          color: AppColors.secondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _status,
+                  style: const TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 10,
+                    height: 1.6,
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _error!,
+                    style: const TextStyle(
+                      color: Color(0xFFFF8A80),
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                if (photoPath == null)
+                  SizedBox(
+                    height: 50,
+                    child: FilledButton.icon(
+                      onPressed: _busy ? null : _capture,
+                      icon: const Icon(Icons.camera_alt_rounded),
+                      label: const Text('التقاط صورة للعنصر'),
+                    ),
+                  )
+                else ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () => setState(
+                                  () => _excludeMode = !_excludeMode,
+                                ),
+                          icon: Icon(
+                            _excludeMode
+                                ? Icons.add_circle_outline_rounded
+                                : Icons.remove_circle_outline_rounded,
+                          ),
+                          label: Text(
+                            _excludeMode ? 'إضافة منطقة' : 'استبعاد منطقة',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        tooltip: 'إعادة القناع',
+                        onPressed: _busy ? null : _resetSelection,
+                        icon: const Icon(Icons.restart_alt_rounded),
+                      ),
+                      const SizedBox(width: 6),
+                      IconButton.filledTonal(
+                        tooltip: 'صورة جديدة',
+                        onPressed: _busy ? null : _retake,
+                        icon: const Icon(Icons.camera_alt_outlined),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  const Text(
+                    'تتم معالجة القناع محلياً على الجهاز',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.success,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
