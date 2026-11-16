@@ -37,13 +37,15 @@ Captured photos and masks remain in app-private storage. No scan uploads are per
 
 ## New calibrated data contracts (November 2026)
 
-- `lib/domain/captured_frame.dart` defines the immutable-by-contract RGB-D frame boundary, depth capability state, stream-specific intrinsics and strict timestamp equality.
-- Frame validation rejects paused/stopped tracking, malformed intrinsics, non-finite data, non-affine poses, non-orthonormal rotations and depth/RGB timestamp mismatches.
+- `lib/domain/captured_frame.dart` defines the RGB-D frame boundary, depth capability state, stream-specific intrinsics and a shared ARCore frame identity.
+- Frame validation rejects paused/stopped tracking, malformed intrinsics, non-finite data, non-affine poses, non-orthonormal rotations and depth payloads attached to a different ARCore frame callback.
 - `DepthAligner` projects lower-resolution depth samples into RGB pixel coordinates using separate depth/RGB intrinsics and a nearest-surface z-buffer; it carries confidence through registration.
 - `SegmentationMaskAligner` maps the lower-resolution segmenter output to the RGB grid using nearest-neighbor sampling.
 - `MaskedPointCloudBuilder` filters by aligned segmentation mask, confidence, depth range and pixel stride, then back-projects points through the world-from-camera pose.
 - `PointCloudVoxelFusion` performs bounded world-space voxel centroid reduction (default 1 cm); it is a point-cloud reducer, not a mesh reconstruction algorithm.
 - Non-zero RGB image rotation is rejected until the native bridge provides an explicit image/depth registration transform.
 - Unit tests cover timestamp synchronization, pose orthonormality, intrinsics, tracking state, depth registration, confidence rejection and point-cloud projection.
+
+ARCore raw-depth images can be reprojected from earlier depth measurements into the current frame; Google documents comparing successive raw-depth image timestamps to detect fresh measurements. Therefore the bridge carries both the current Frame timestamp and the depth Image timestamp, plus an explicit reprojected flag. The invariant is shared Frame identity, not naive equality between the RGB and raw-depth Image timestamps. See the ARCore Raw Depth guide: https://developers.google.com/ar/develop/java/depth/raw-depth.
 
 These are implemented Dart contracts and deterministic processing primitives. They do **not** mean the Android bridge is already connected: the app still needs the maintained native plugin fork and the ARCore device probe before any depth-backed scan can be claimed.
