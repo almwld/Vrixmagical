@@ -15,7 +15,7 @@ manifest = Path("android/app/src/main/AndroidManifest.xml")
 if manifest.exists():
     text = manifest.read_text()
     if "android.permission.INTERNET" not in text:
-        text = text.replace("</manifest>", '    <uses-permission android:name="android.permission.INTERNET" />\\n</manifest>')
+        text = text.replace("</manifest>", '    <uses-permission android:name="android.permission.INTERNET" />\n</manifest>')
     manifest.write_text(text)
 PY
 echo "Android host project is ready (compileSdk 36, minSdk 28)."

@@ -40,7 +40,7 @@ jobs:
           if manifest.exists():
               text = manifest.read_text()
               text = text.replace("<manifest", '<manifest xmlns:tools="http://schemas.android.com/tools"', 1)
-              text = text.replace("</manifest>", '    <uses-permission android:name="android.permission.INTERNET" />\\n</manifest>')
+              text = text.replace("</manifest>", '    <uses-permission android:name="android.permission.INTERNET" />\n</manifest>')
               manifest.write_text(text)
           PY
 
