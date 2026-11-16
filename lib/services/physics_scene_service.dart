@@ -88,6 +88,52 @@ class PhysicsSceneService {
     );
   }
 
+  void addDynamicSphere({
+    required String id,
+    required Matrix4 worldTransform,
+    required double radius,
+    double friction = 0.55,
+    double restitution = 0.08,
+  }) {
+    _ensureAvailable();
+    _validateId(id);
+    _validateRadius(radius);
+    _validateMaterial(friction, restitution);
+    _insertBody(
+      id,
+      shape: jolt.SphereShape(radius: radius),
+      motionType: jolt.MotionType.dynamic,
+      transform: _toPhysicsTransform(worldTransform),
+      friction: friction,
+      restitution: restitution,
+    );
+  }
+
+  void addDynamicCapsule({
+    required String id,
+    required Matrix4 worldTransform,
+    required double radius,
+    required double halfHeight,
+    double friction = 0.65,
+    double restitution = 0.02,
+  }) {
+    _ensureAvailable();
+    _validateId(id);
+    _validateRadius(radius);
+    if (!halfHeight.isFinite || halfHeight <= 0) {
+      throw ArgumentError.value(halfHeight, 'halfHeight');
+    }
+    _validateMaterial(friction, restitution);
+    _insertBody(
+      id,
+      shape: jolt.CapsuleShape(halfHeight: halfHeight, radius: radius),
+      motionType: jolt.MotionType.dynamic,
+      transform: _toPhysicsTransform(worldTransform),
+      friction: friction,
+      restitution: restitution,
+    );
+  }
+
   void _insertBody(
     String id, {
     required jolt.ColliderShape shape,
@@ -237,6 +283,12 @@ class PhysicsSceneService {
         extents.y <= 0 ||
         extents.z <= 0) {
       throw ArgumentError.value(extents, 'halfExtents');
+    }
+  }
+
+  void _validateRadius(double radius) {
+    if (!radius.isFinite || radius <= 0) {
+      throw ArgumentError.value(radius, 'radius');
     }
   }
 
