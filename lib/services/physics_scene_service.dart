@@ -722,7 +722,7 @@ class PhysicsSceneService {
         rotation,
         jolt.JPH_Activation_Activate,
       );
-      if (resetVelocity && record.motionType != jolt.JJ_MOTION_STATIC) {
+      if (resetVelocity && record.motionType == jolt.JJ_MOTION_DYNAMIC) {
         final zero = arena<jolt.JPH_Vec3>();
         zero.ref..x = 0..y = 0..z = 0;
         jolt.JPH_BodyInterface_SetLinearVelocity(
