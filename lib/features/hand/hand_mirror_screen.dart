@@ -403,3 +403,66 @@ class _HandPointPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _HandPointPainter oldDelegate) => oldDelegate.point != point;
 }
+
+class _TrackingMetric extends StatelessWidget {
+  const _TrackingMetric({
+    required this.active,
+    required this.pinching,
+  });
+
+  final bool active;
+  final bool pinching;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = pinching
+        ? AppColors.primary
+        : active
+            ? AppColors.success
+            : AppColors.muted;
+    final label = pinching
+        ? 'OBJECT GRABBED'
+        : active
+            ? 'HAND DETECTED'
+            : 'SEARCHING FOR HAND';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: const Color(0xDD101A28),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: .35)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            pinching ? Icons.back_hand_rounded : Icons.radar_rounded,
+            color: color,
+            size: 19,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 9,
+                letterSpacing: 1,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Text(
+            pinching ? 'PINCH' : active ? 'TRACKING' : 'READY',
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 8,
+              letterSpacing: .8,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
