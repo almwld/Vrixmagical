@@ -97,7 +97,7 @@ void main() {
       expect(hits.first.bodyId, 'query-box');
     });
 
-    test('supports constrained bodies and guards teleporting jointed bodies', () {
+    test('supports constraints and preserves joint graph during body teleports', () {
       physics.addDynamicBox(
         id: 'joint-a',
         worldTransform: Matrix4.identity()
@@ -124,12 +124,14 @@ void main() {
       );
 
       expect(physics.jointCount, 1);
+      physics.setBodyWorldTransform(
+        'joint-a',
+        Matrix4.identity()..setTranslation(Vector3(-0.25, 2, 0)),
+      );
+      expect(physics.jointCount, 1);
       expect(
-        () => physics.setBodyWorldTransform(
-          'joint-a',
-          Matrix4.identity()..setTranslation(Vector3(1, 2, 0)),
-        ),
-        throwsStateError,
+        physics.bodyWorldTransform('joint-a').getTranslation().x,
+        closeTo(-0.25, 0.001),
       );
       physics.setJointEnabled('hinge', false);
       physics.setJointMotor(
