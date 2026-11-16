@@ -372,6 +372,11 @@ class PointCloudVoxelFusion {
         (point.z / voxelSizeMeters).floor(),
       );
       (voxels[key] ??= _VoxelAccumulator()).add(point);
+      if (voxels.length > maximumOutputPoints) {
+        throw StateError(
+          'Point cloud exceeds the configured output limit; increase voxel size or reduce capture density.',
+        );
+      }
     }
     if (voxels.length > maximumOutputPoints) {
       throw StateError(
