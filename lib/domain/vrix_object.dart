@@ -38,8 +38,8 @@ class VrixTransform {
       throw const FormatException('Transform scale values must be positive.');
     }
     final norm = rotation.fold<double>(0, (sum, value) => sum + value * value);
-    if (norm < 1e-12) {
-      throw const FormatException('Rotation quaternion must not be zero.');
+    if ((norm - 1).abs() > 0.01) {
+      throw const FormatException('Rotation quaternion must be normalized.');
     }
   }
 }
@@ -100,7 +100,7 @@ class PhysicsProfile {
       };
 
   void validate() {
-    if (!mass.isFinite || mass <= 0) {
+    if (!mass.isFinite || (isStatic ? mass < 0 : mass <= 0)) {
       throw const FormatException('Physics mass must be positive and finite.');
     }
     _validateVector(halfExtents, 3, 'halfExtents');
@@ -238,7 +238,8 @@ void _ensureJsonSafe(Object? value, [String path = 'metadata']) {
       if (entry.key.toLowerCase().contains('token') ||
           entry.key.toLowerCase().contains('password') ||
           entry.key.toLowerCase().contains('secret') ||
-          entry.key.toLowerCase().contains('api_key')) {
+          entry.key.toLowerCase().contains('api_key') ||
+          entry.key.toLowerCase().contains('apikey')) {
         throw FormatException('Sensitive key is not allowed in $path.');
       }
       _ensureJsonSafe(entry.value, '$path.${entry.key}');
