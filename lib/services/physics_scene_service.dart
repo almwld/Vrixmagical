@@ -99,12 +99,14 @@ class _JointRecord {
     required this.handle,
     required this.bodyA,
     required this.bodyB,
+    required this.kind,
   });
 
   final String id;
   final int handle;
   final String bodyA;
   final String? bodyB;
+  final PhysicsJointKind kind;
 }
 
 /// Production-oriented Jolt Physics 5.6 world adapter.
@@ -615,7 +617,7 @@ class PhysicsSceneService {
     final anchorB = pointB ?? Vector3.zero();
     final jointAxis = axis ?? Vector3(0, 1, 0);
     final jointNormal = normal ?? Vector3(1, 0, 0);
-    if (a == null || (bodyB != null && b == null)) {
+    if (a == null || (bodyB != null && b == null) || bodyA == bodyB) {
       throw ArgumentError('Both joint bodies must exist in this world.');
     }
     if (!_isFiniteVector(anchorA) ||
@@ -638,6 +640,12 @@ class PhysicsSceneService {
       throw ArgumentError('Invalid joint motor or spring settings.');
     }
     final hasLimits = lowerLimit != null || upperLimit != null;
+    if (hasLimits &&
+        kind != PhysicsJointKind.hinge &&
+        kind != PhysicsJointKind.slider &&
+        kind != PhysicsJointKind.distance) {
+      throw ArgumentError('Limits are only supported for hinge, slider and distance joints.');
+    }
     final minLimit = lowerLimit ?? 0;
     final maxLimit = upperLimit ?? 0;
     if (hasLimits &&
@@ -678,6 +686,7 @@ class PhysicsSceneService {
       handle: handle,
       bodyA: bodyA,
       bodyB: bodyB,
+      kind: kind,
     );
     return id;
   }
@@ -696,9 +705,12 @@ class PhysicsSceneService {
     _ensureAvailable();
     if (!target.isFinite) throw ArgumentError.value(target, 'target');
     final joint = _joints[id];
-    if (joint != null) {
-      jolt.jj_joint_set_motor(joint.handle, _motorValue(motor), target);
+    if (joint == null) return;
+    if (joint.kind != PhysicsJointKind.hinge &&
+        joint.kind != PhysicsJointKind.slider) {
+      throw StateError('Only hinge and slider joints have motors.');
     }
+    jolt.jj_joint_set_motor(joint.handle, _motorValue(motor), target);
   }
 
   double? jointValue(String id) {
