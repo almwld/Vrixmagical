@@ -176,10 +176,10 @@ class CapturedFrame {
 class DepthAligner {
   const DepthAligner();
 
-  Float32List alignToRgb(DepthFrame depth, CameraIntrinsics rgbIntrinsics) {
+  Float32List alignToRgb(DepthFrame depth, CameraIntrinsics rgbIntrinsics) =>\n      _alignToRgb(depth, rgbIntrinsics).values;\n\n  AlignedDepthFrame alignDepthAndConfidence(\n    DepthFrame depth,\n    CameraIntrinsics rgbIntrinsics,\n  ) => _alignToRgb(depth, rgbIntrinsics);\n\n  AlignedDepthFrame _alignToRgb(DepthFrame depth, CameraIntrinsics rgbIntrinsics) {
     depth.validate();
     rgbIntrinsics.validate();
-    final aligned = Float32List(rgbIntrinsics.width * rgbIntrinsics.height);
+    final aligned = Float32List(rgbIntrinsics.width * rgbIntrinsics.height);\n    final confidence = Uint8List(rgbIntrinsics.width * rgbIntrinsics.height);
     for (var y = 0; y < depth.height; y++) {
       for (var x = 0; x < depth.width; x++) {
         final sourceIndex = y * depth.width + x;
@@ -187,9 +187,9 @@ class DepthAligner {
         if (meters <= 0 || depth.confidence[sourceIndex] == 0) continue;
 
         final cameraX = (x - depth.intrinsics.cx) * meters / depth.intrinsics.fx;
-        final cameraY = (y - depth.intrinsics.cy) * meters / depth.intrinsics.fy;
+        final cameraY = -(y - depth.intrinsics.cy) * meters / depth.intrinsics.fy;
         final rgbX = (rgbIntrinsics.fx * cameraX / meters + rgbIntrinsics.cx).round();
-        final rgbY = (rgbIntrinsics.fy * cameraY / meters + rgbIntrinsics.cy).round();
+        final rgbY = (-rgbIntrinsics.fy * cameraY / meters + rgbIntrinsics.cy).round();
         if (rgbX < 0 || rgbX >= rgbIntrinsics.width ||
             rgbY < 0 || rgbY >= rgbIntrinsics.height) continue;
 
@@ -197,7 +197,7 @@ class DepthAligner {
         final previous = aligned[targetIndex];
         // Keep the nearest valid surface when multiple depth samples land
         // on one RGB pixel (z-buffer behavior).
-        if (previous == 0 || meters < previous) aligned[targetIndex] = meters;
+        if (previous == 0 || meters < previous) {\n          aligned[targetIndex] = meters;\n          confidence[targetIndex] = depth.confidence[sourceIndex];\n        }
       }
     }
     return aligned;
@@ -216,7 +216,7 @@ class MaskedPointCloudBuilder {
   }) {
     frame.validate(requireDepth: true);
     final depth = frame.depth!;
-    final alignedDepth = const DepthAligner().alignToRgb(depth, frame.rgbIntrinsics);
+    final aligned = const DepthAligner().alignDepthAndConfidence(depth, frame.rgbIntrinsics);
     final expected = frame.rgbWidth * frame.rgbHeight;
     if (rgbMask.length != expected) {
       throw const FormatException('Segmentation mask must be aligned to RGB dimensions.');
