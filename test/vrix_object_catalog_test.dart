@@ -110,15 +110,6 @@ void main() {
     });
 
     test('rejects duplicate ids, unsafe paths and unknown schema versions', () {
-      final duplicate = manifest.replaceFirst(
-        '"id": "chair-01",',
-        '"id": "chair-01",',
-      ).replaceFirst(
-        '"id": "chair-01",',
-        '"id": "chair-02",',
-      );
-      // The one-entry manifest remains valid; duplicate detection is covered
-      // with a duplicated entry in a separate minimal payload.
       expect(() => ObjectLibraryCatalog.decode('{"schemaVersion":2}'),
           throwsFormatException);
       final unsafe = manifest.replaceFirst('models/chair.glb', '../chair.glb');
@@ -132,7 +123,6 @@ void main() {
       );
       expect(() => ObjectLibraryCatalog.decode(duplicatePayload),
           throwsFormatException);
-      expect(duplicate, isNotEmpty);
     });
   });
 }
