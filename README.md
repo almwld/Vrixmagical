@@ -6,7 +6,7 @@ VirxMagical is an Android-first Flutter application for interactive digital repr
 
 - Arabic-first Flutter app shell and navigation.
 - **AR scene:** native ARCore/ARKit session through `flutter_reality`, horizontal/vertical plane detection, tap hit-testing, anchors, GLB placement, drag/rotate and removal.
-- **3D physics:** standalone Jolt Physics 5.6 native runtime through `just_jolt`; static/dynamic rigid bodies, box/sphere/capsule colliders, continuous collision mode, collision layers, sensors, buffered contact events, ray queries and six joint families.
+- **3D physics:** standalone Jolt Physics 5.6 native runtime through `just_jolt`; static/dynamic rigid bodies, box/sphere/capsule/convex-hull/static-triangle-mesh colliders, continuous collision mode, collision layers, sensors, buffered contact events, ray queries and six joint families.
 - **Physics-to-AR bridge:** fixed-step Jolt simulation, batch active-body transform reads, world-to-anchor-local pose conversion, manual interaction hand-off and explicit native teardown.
 - **Hand mirror:** camera preview plus Google's MediaPipe Hand Landmarker in live-stream mode. A pinch grabs and moves a digital overlay; the physical source object is never modified.
 - **Scene analysis:** on-device MediaPipe Object Detector and Image Segmenter on a captured frame.
@@ -18,7 +18,7 @@ Jolt owns rigid-body simulation; `flutter_reality`/ARCore owns camera tracking, 
 
 The app adapter exposes static/dynamic bodies, box/sphere/capsule colliders, sensors, collision-layer masks, contact/sensor/activation events, raycasts, continuous collision mode, and fixed/point/hinge/slider/distance/six-DOF joints. AR objects are synchronized using batched reads of awake bodies and bodies that just went to sleep. Drag/rotate hand-off teleports an unjointed body and resets its velocity; a joint-connected body is protected from this operation.
 
-The current AR placement sample uses a finite static box for the tapped surface and a manually approximated dynamic box for the sample Duck asset. Imported GLB collider metadata/automatic convex decomposition, moving tracked-plane updates, and anchor-loss recovery are not yet implemented. Native Android runtime startup, physical-device AR calibration, stress/performance profiling, and lifecycle soak tests remain required before production certification. Soft-body simulation, fluids, AR depth/occlusion and scene reconstruction are separate capabilities and are not claimed as implemented.
+The current AR placement sample uses a finite static box for the tapped surface and a manually approximated dynamic box for the sample Duck asset. The service also supports convex-hull and static triangle-mesh cooking, but automatic GLB mesh extraction/collider generation and per-asset collider metadata are not yet wired. Moving tracked-plane updates and anchor-loss recovery still need implementation. Native Android runtime startup, physical-device AR calibration, stress/performance profiling, and lifecycle soak tests remain required before production certification. Soft-body simulation, fluids, AR depth/occlusion and scene reconstruction are separate capabilities and are not claimed as implemented.
 
 ## Camera ownership
 
