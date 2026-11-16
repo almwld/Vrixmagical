@@ -83,9 +83,9 @@ class StudioScreen extends StatelessWidget {
         ),
         _StudioTool(
           icon: Icons.content_cut_rounded,
-          title: 'العزل التفاعلي الدقيق',
-          description: 'المس العنصر لتحديده، وأضف نقاط استبعاد لتنقية القناع.',
-          technology: 'INTERACTIVE SEGMENTER · MAGICTOUCH',
+          title: 'مسح الأجسام متعددة الزوايا',
+          description: 'اعزل الجسم ثم التقط عدة زوايا واحفظ الصور والأقنعة في جلسة مسح واحدة.',
+          technology: 'MULTI-VIEW RGB · INTERACTIVE SEGMENTATION',
           color: const Color(0xFF9C9BFF),
           onTap: () => _open(context, const InteractiveCutoutScreen()),
         ),
