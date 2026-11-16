@@ -76,6 +76,19 @@ void main() {
       );
     });
 
+    test('rejects non-finite gravity and invalid solver limits', () {
+      final invalidGravity = FixedStepPhysics(
+        gravity: const Vec3(double.nan, 0, 0),
+      );
+      invalidGravity.addBody(
+        PhysicsBody(objectId: 'body', position: const Vec3.zero()),
+      );
+      expect(() => invalidGravity.advance(1 / 60), throwsStateError);
+
+      final invalidStep = FixedStepPhysics(stepSeconds: 0);
+      expect(() => invalidStep.advance(1 / 60), throwsStateError);
+    });
+
     test('rejects invalid bodies and time deltas', () {
       final physics = FixedStepPhysics();
       expect(
