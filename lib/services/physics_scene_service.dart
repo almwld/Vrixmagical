@@ -1104,16 +1104,7 @@ class PhysicsSceneService {
         maxHits,
       );
       if (count < 0) throw StateError('Jolt raycast failed: $count');
-      return List<PhysicsRaycastHit>.generate(count, (index) {
-        final hit = hits[index];
-        return PhysicsRaycastHit(
-          bodyId: _bodyIdsByHandle[hit.body],
-          point: Vector3(hit.point[0], hit.point[1], hit.point[2]),
-          normal: Vector3(hit.normal[0], hit.normal[1], hit.normal[2]),
-          fraction: hit.fraction,
-          depth: hit.depth,
-        );
-      });
+      return _mapHits(hits, math.min(count, maxHits).toInt());
     });
   }
 
@@ -1151,7 +1142,7 @@ class PhysicsSceneService {
           maxHits,
         );
         if (count < 0) throw StateError('Jolt overlap query failed: $count');
-        return _mapHits(hits, count);
+        return _mapHits(hits, math.min(count, maxHits).toInt());
       } finally {
         jolt.jj_shape_release(shape.cast<Void>());
       }
