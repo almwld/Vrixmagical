@@ -26,6 +26,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/mediapipe/
+    - assets/models/
 hooks:
   user_defines:
     mediapipe_vision:
