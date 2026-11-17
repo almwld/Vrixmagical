@@ -84,6 +84,8 @@ import android.app.Presentation
 import android.content.Context
 import android.hardware.display.DisplayManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Display
 import android.view.Gravity
 import android.view.View
@@ -107,8 +109,16 @@ internal class LgWingDeckController(
     private var physicsEnabled = true
     private var physicsLabel = "Jolt"
     private var touchThreshold = 0.18
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) { showDeck() }
+        override fun onDisplayChanged(displayId: Int) { if (presentation == null) showDeck() }
+        override fun onDisplayRemoved(displayId: Int) {
+            if (presentation?.display?.displayId == displayId) hideDeck()
+        }
+    }
 
     init {
+        displayManager.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "show" -> result.success(showDeck())
@@ -160,6 +170,7 @@ internal class LgWingDeckController(
     }
 
     fun dispose() {
+        displayManager.unregisterDisplayListener(displayListener)
         hideDeck()
         channel.setMethodCallHandler(null)
     }
