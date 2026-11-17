@@ -81,6 +81,14 @@ jobs:
           unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
           grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-apk-files.txt
 
+      - name: Android split release APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Verify split APK outputs
+        run: |
+          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
+          test -s build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+
       - name: Android release App Bundle
         run: flutter build appbundle --release
 
@@ -95,6 +103,7 @@ jobs:
           name: virxmagical-release-apk-and-aab
           path: |
             build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-*-release.apk
             build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 14
