@@ -675,7 +675,7 @@ class ArView(
     }
 
     private fun copyDepth(frame: Frame, image: Image, confidenceImage: Image?, raw: Boolean): DepthCopy {
-        val w=image.width; val h=image.height; val p=image.planes[0]; val src=p.buffer.duplicate()
+        val w=image.width; val h=image.height; val p=image.planes[0]; val src=p.buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         val values=ByteBuffer.allocate(w*h*4).order(ByteOrder.LITTLE_ENDIAN)
         for(y in 0 until h) for(x in 0 until w) {
             val mm=src.getShort(y*p.rowStride+x*p.pixelStride).toInt() and 0xffff
