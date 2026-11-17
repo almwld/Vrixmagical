@@ -38,17 +38,11 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Verify native SplatKit dependency
+      - name: Verify local XPBD plugin resolution
         run: |
-          cd android
-          for attempt in 1 2 3; do
-            if ./gradlew :app:dependencyInsight --dependency splatkit-android --configuration debugCompileClasspath | tee /tmp/splatkit-dependency.txt; then
-              break
-            fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep $((attempt * 20))
-          done
-          grep -F 'io.github.xget7:splatkit-android:0.1.0-beta.3' /tmp/splatkit-dependency.txt
+          grep -A5 '^  vrix_soft_body:' .dart_tool/package_config.json
+          test -s packages/vrix_soft_body/android/src/main/cpp/CMakeLists.txt
+          test -s packages/vrix_soft_body/android/src/main/cpp/vrix_soft_body.cpp
 
       - name: Bundle pinned MediaPipe models
         run: dart run mediapipe_core:bundle_models
