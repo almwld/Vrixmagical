@@ -74,3 +74,17 @@ The Android bridge and Flutter consumer are now wired in source. The CI workflow
 - The scan manifest records tetrahedral element counts and min/max six-volume. `solverIntegrated` remains false in the manifest because a generated mesh/runtime session is not equivalent to a validated Jolt↔XPBD coupled simulation.
 
 Quality boundary: this is a structured voxel tetrahedralization, **not** constrained-Delaunay or quality-optimized tetrahedral meshing. The surface is still voxel-derived and can be blocky; it is not a TSDF/Poisson reconstruction. The generated tetrahedra are validated for finite non-zero rest volume and face incidence, but no arbitrary-shape aspect-ratio optimization, scan-to-ground-truth accuracy score, or device-derived quality acceptance has been established. Real captured scans and the target LG V60 remain required for those claims.
+
+
+## XPBD surface-contact foundation (2026-11-17)
+
+The native XPBD backend now exposes per-vertex unilateral surface-contact constraints:
+- `vrix_soft_body_set_contact` accepts a rigid-surface point, outward normal, friction coefficient and compliance. Normals are normalized and invalid geometry/material values are rejected.
+- The solver applies a non-negative XPBD normal multiplier, so contact cannot pull the soft vertex toward the rigid surface.
+- Tangential positional friction is clamped by the Coulomb bound `mu * lambda_normal`; it is not a fluid/adhesion model.
+- `vrix_soft_body_read_reaction_forces` returns the accumulated opposite contact reaction in newtons, packed XYZ per vertex, and clears the readback.
+- Dart FFI exposes set/clear contact and reaction readback. Position, velocity, and reaction native buffers are allocated once per body and reused for reads; Dart result lists are still copied for API safety.
+
+The native host smoke test now exercises a penetrating vertex against a plane, checks finite state/non-penetration, and verifies a finite reaction force.
+
+**Important boundary:** this is the XPBD-side contact primitive, not completed Jolt↔XPBD two-way coupling. The production bridge still needs stable per-step Jolt contact manifold data, coordinate-space conversion, nearest surface vertex/face mapping, contact lifetime management, and equal/opposite impulse application to dynamic Jolt bodies. Current Jolt events alone are insufficient to claim continuous manifold-level coupling. No device performance or runtime validation is implied by this source change.
