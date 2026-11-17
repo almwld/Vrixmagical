@@ -161,7 +161,7 @@ abstract interface class VrixSoftBodyEngine {
   void setPointTarget({
     required SoftBodyHandle body,
     required int vertexIndex,
-    required List<double> targetWorldPosition,
+    required List<double> targetObjectPosition,
     double compliance = 0,
   });
 
