@@ -10,19 +10,23 @@ include(FetchContent)
 if(POLICY CMP0169)
   cmake_policy(SET CMP0169 OLD)
 endif()
-# Android cross-compilation must not build or execute Eigen documentation examples.
-set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
-set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-
-# Eigen is the only math dependency used by the selected upstream solver files.
+# Eigen is header-only for the selected solver sources. Populate its pinned
+# source tree directly instead of adding the full upstream project: Eigen's
+# default project graph also defines BLAS/LAPACK/bench targets that are not
+# dependencies of VRIX and cannot be built as part of Android cross-compiling.
 FetchContent_Declare(
   eigen
   GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
   GIT_TAG 3.4.0
   GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(eigen)
+FetchContent_GetProperties(eigen)
+if(NOT eigen_POPULATED)
+  FetchContent_Populate(eigen)
+endif()
+add_library(vrix_eigen INTERFACE)
+target_include_directories(vrix_eigen SYSTEM INTERFACE ${eigen_SOURCE_DIR})
+add_library(Eigen3::Eigen ALIAS vrix_eigen)
 
 # Pin the exact reviewed upstream revision. We compile only the XPBD/FEM
 # implementation and its two implementation dependencies; desktop demos,
