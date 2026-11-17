@@ -19,12 +19,8 @@ if splatkit_dependency not in text:
         text += "\n\ndependencies {\n    " + splatkit_dependency + "\n}\n"
 if splatkit_dependency not in text:
     raise SystemExit("Failed to add the SplatKit Android dependency to app/build.gradle.kts.")
-if "abiFilters" not in text:
-    text = text.replace(
-        "minSdk = 29",
-        'minSdk = 29\n        ndk { abiFilters += listOf("arm64-v8a") }',
-        1,
-    )
+# Keep ABI selection in the build command. An ndk.abiFilters restriction conflicts
+# with Flutter Gradle's --split-per-abi output configuration.
 gradle.write_text(text)
 
 manifest = Path("android/app/src/main/AndroidManifest.xml")
