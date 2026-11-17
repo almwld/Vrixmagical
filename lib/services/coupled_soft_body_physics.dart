@@ -87,7 +87,7 @@ class CoupledSoftBodyPhysics {
     final before = engine.readState(softBody);
     _moveProxyToSoftBodyCentre(before.positions, deltaSeconds);
     final rigidSteps = scene.advance(deltaSeconds);
-    _consumeJoltContacts();
+    _consumeJoltContacts(deltaSeconds);
     engine.step(deltaSeconds);
     _applyXpbdReactions(deltaSeconds);
     _coupledSteps++;
@@ -103,8 +103,18 @@ class CoupledSoftBodyPhysics {
     scene.moveKinematic(proxyBodyId, target, deltaSeconds: dt);
   }
 
-  void _consumeJoltContacts() {
+  void _consumeJoltContacts(double deltaSeconds) {
     final events = scene.drainEvents();
+    // A contact-end event arrives after Jolt's step, while XPBD still holds
+    // the reaction accumulated during the previous soft-body step. Flush it
+    // before clearing the vertex constraint or its rigid-body reaction is lost.
+    final hasProxyContactEnd = events.any(
+      (event) =>
+          event.isContactEnd &&
+          (event.bodyA == proxyBodyId || event.bodyB == proxyBodyId),
+    );
+    if (hasProxyContactEnd) _applyXpbdReactions(deltaSeconds);
+
     for (final event in events) {
       if (event.bodyA != proxyBodyId && event.bodyB != proxyBodyId) continue;
       final otherBody = event.bodyA == proxyBodyId ? event.bodyB : event.bodyA;
