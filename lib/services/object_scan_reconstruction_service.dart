@@ -175,7 +175,7 @@ class ObjectScanReconstructionService {
 
     manifest['reconstruction'] = {
       'status': 'voxel_surface_preview_with_tetrahedral_volume',
-      'algorithm': 'world-space-voxel-occupancy-boundary',
+      'algorithm': 'registered-rgbd-voxel-volume-tetrahedralization-boundary',
       'isPhotogrammetry': false,
       'isProductionSurface': false,
       'output': 'reconstruction.glb',
