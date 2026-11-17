@@ -123,7 +123,7 @@ internal class LgWingDeckController(
                     physicsEnabled = values["physicsEnabled"] as? Boolean ?: physicsEnabled
                     physicsLabel = values["physicsLabel"] as? String ?: physicsLabel
                     touchThreshold = (values["touchThreshold"] as? Number)?.toDouble() ?: touchThreshold
-                    presentation?.refresh()
+                    presentation?.update(fps, objectCount, physicsEnabled, physicsLabel, touchThreshold)
                     result.success(null)
                 }
                 else -> result.notImplemented()
