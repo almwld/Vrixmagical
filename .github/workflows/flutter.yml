@@ -103,27 +103,7 @@ jobs:
           ARM64_APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           test -s "$ARM64_APK"
           unzip -Z1 "$ARM64_APK" | tee /tmp/split-arm64-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\\.so
-      - name: Android release App Bundle
-        run: flutter build appbundle --release
-
-      - name: Verify native libraries in release bundle
-        run: |
-          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
-          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
-          grep -F 'base/lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-aab-files.txt
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/split-arm64-files.txt
+          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/split-arm64-files.txt
           grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/split-arm64-files.txt
 
       - name: Android release App Bundle
