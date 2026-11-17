@@ -60,3 +60,13 @@ The Android bridge and Flutter consumer are now wired in source. The CI workflow
 - `test/voxel_mesh_reconstruction_test.dart` covers a dense voxel block, sparse/over-budget rejection and GLB header/length.
 - The scan screen exposes reconstruction after the capture session is completed and retains the Jolt world while the scan screen is active.
 - Remaining: higher-quality TSDF/Poisson/BPA reconstruction, watertightness/normal validation on real scans, collider simplification, tetrahedralization for XPBD, dynamic Jolt↔XPBD contact coupling, and physical-device performance/thermal acceptance.
+
+
+## Tetrahedral volume and indexed boundary (follow-up)
+
+- `lib/services/voxel_tetrahedralizer.dart` now creates a conforming structured tetrahedral volume from the fused occupied voxels: six tetrahedra per voxel, shared lattice vertices, a shared-face incidence map, rejection of non-manifold faces, and non-zero rest-volume checks.
+- The boundary is extracted from singly incident tetrahedral faces, oriented outward using each element's opposite vertex, and exported as an indexed surface. The same indexed boundary is used by the static Jolt collider path.
+- `test/voxel_tetrahedralizer_test.dart` checks one-voxel and adjacent-voxel topology, boundary counts, volume validation, and budget rejection.
+- The scan manifest now records tetrahedral element counts and min/max six-volume.
+
+Quality boundary: this is a structured voxel tetrahedralization, **not** constrained-Delaunay or quality-optimized tetrahedral meshing. The surface is still voxel-derived and can be blocky; it is not a TSDF/Poisson reconstruction. The generated tetrahedra are validated for finite non-zero rest volume and face incidence, but no arbitrary-shape aspect-ratio optimization, scan-to-ground-truth accuracy score, or device-derived quality acceptance has been established. Real captured scans and the target LG V60 remain required for those claims.
