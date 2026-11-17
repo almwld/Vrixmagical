@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../domain/captured_frame.dart';
+
 /// A single RGB view and its foreground mask from one object-scan session.
 /// Camera pose/depth are deliberately nullable until the ARCore bridge supplies
 /// calibrated measurements; a photo-only bundle must never masquerade as a mesh.
@@ -16,6 +18,7 @@ class ObjectScanView {
     this.maskHeight,
     this.cameraPose,
     this.cameraPoseSynchronized = false,
+    this.capturedFrame,
     required this.promptX,
     required this.promptY,
     DateTime? capturedAt,
@@ -31,6 +34,7 @@ class ObjectScanView {
   /// It is trusted for reconstruction only when [cameraPoseSynchronized] is true.
   final List<double>? cameraPose;
   final bool cameraPoseSynchronized;
+  final CapturedFrame? capturedFrame;
   final double promptX;
   final double promptY;
   final DateTime capturedAt;
@@ -46,6 +50,15 @@ class ObjectScanView {
     if (cameraPose != null &&
         (cameraPose!.length != 16 || cameraPose!.any((value) => !value.isFinite))) {
       throw const FormatException('AR camera pose must be a finite 4x4 matrix.');
+    }
+    if (capturedFrame != null) {
+      capturedFrame!.validate();
+      if (capturedFrame!.rgbWidth != width || capturedFrame!.rgbHeight != height) {
+        throw const FormatException('CapturedFrame RGB dimensions must match the stored source image.');
+      }
+      if (cameraPoseSynchronized != true || cameraPose == null) {
+        throw const FormatException('A synchronized frame must provide its trusted camera pose.');
+      }
     }
     if (maskPng.length < 8) {
       throw const FormatException('A non-empty PNG foreground mask is required.');
@@ -131,9 +144,22 @@ class ObjectScanStore {
     final maskName = 'mask_${index.toString().padLeft(3, '0')}.png';
     final imageTarget = File('${_directory.path}/$imageName');
     final maskTarget = File('${_directory.path}/$maskName');
+    final depth = view.capturedFrame?.depth;
+    final depthName = depth == null ? null : 'depth_${index.toString().padLeft(3, '0')}.f32le';
+    final confidenceName = depth == null ? null : 'confidence_${index.toString().padLeft(3, '0')}.u8';
+    final depthTarget = depthName == null ? null : File('${_directory.path}/$depthName');
+    final confidenceTarget = confidenceName == null ? null : File('${_directory.path}/$confidenceName');
     await view.imageFile.copy(imageTarget.path);
     try {
       await maskTarget.writeAsBytes(view.maskPng, flush: true);
+      if (depth != null && depthTarget != null && confidenceTarget != null) {
+        final depthData = ByteData(depth.valuesMeters.length * 4);
+        for (var i = 0; i < depth.valuesMeters.length; i++) {
+          depthData.setFloat32(i * 4, depth.valuesMeters[i], Endian.little);
+        }
+        await depthTarget.writeAsBytes(depthData.buffer.asUint8List(), flush: true);
+        await confidenceTarget.writeAsBytes(depth.confidence, flush: true);
+      }
       _views.add({
         'index': index,
         'image': imageName,
@@ -152,13 +178,30 @@ class ObjectScanStore {
             ? 'unavailable'
             : (view.cameraPoseSynchronized ? 'synchronized' : 'unverified-unsynchronized'),
         'cameraPoseConvention': view.cameraPose == null ? null : 'column-major-world-from-camera-meters',
-        'depthMap': null,
+        'frameTimestampNs': view.capturedFrame?.frameTimestampNs,
+        'rgbTimestampNs': view.capturedFrame?.rgbTimestampNs,
+        'rgbIntrinsics': view.capturedFrame?.rgbIntrinsics.toJson(),
+        'depthMap': depth == null ? null : {
+          'file': depthName,
+          'confidenceFile': confidenceName,
+          'width': depth.width,
+          'height': depth.height,
+          'frameTimestampNs': depth.frameTimestampNs,
+          'imageTimestampNs': depth.imageTimestampNs,
+          'isRaw': depth.isRaw,
+          'isReprojected': depth.isReprojected,
+          'confidenceAvailable': depth.confidenceAvailable,
+          'intrinsics': depth.intrinsics.toJson(),
+          'encoding': 'float32-little-endian-meters',
+        },
       });
       await _writeManifest();
     } catch (_) {
       if (_views.isNotEmpty && _views.last['index'] == index) _views.removeLast();
       if (await imageTarget.exists()) await imageTarget.delete();
       if (await maskTarget.exists()) await maskTarget.delete();
+      if (depthTarget != null && await depthTarget.exists()) await depthTarget.delete();
+      if (confidenceTarget != null && await confidenceTarget.exists()) await confidenceTarget.delete();
       rethrow;
     }
   }
@@ -182,11 +225,13 @@ class ObjectScanStore {
 
   Future<void> _writeManifest() async {
     final payload = <String, Object?>{
-      'schemaVersion': 2,
+      'schemaVersion': 3,
       'id': id,
       'displayName': displayName,
       'source': 'captured',
-      'captureKind': 'masked-multiview-rgb',
+      'captureKind': _views.any((view) => view['depthMap'] != null)
+          ? 'masked-multiview-rgbd'
+          : 'masked-multiview-rgb',
       'createdAt': _createdAt.toIso8601String(),
       'updatedAt': DateTime.now().toUtc().toIso8601String(),
       'status': _complete ? 'captured' : 'collecting',
@@ -194,7 +239,7 @@ class ObjectScanStore {
       'reconstruction': {
         'status': 'not_started',
         'output': null,
-        'note': 'RGB views and masks only. Legacy pose candidates are explicitly unverified because pose and PixelCopy snapshot are separate calls. Synchronized RGB-D frames are required before reconstruction.',
+        'note': 'Synchronized RGB-D frames and masks are persisted when device depth is available. Point-cloud fusion, mesh generation and collider baking have not yet run.',
       },
       'views': _views,
     };
