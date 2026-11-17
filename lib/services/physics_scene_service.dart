@@ -126,6 +126,7 @@ class PhysicsSceneService {
     this.maxSubSteps = 5,
     this.collisionSteps = 2,
     this.maxBodies = 2048,
+    this.reportContactStay = false,
   }) {
     if (!fixedStepSeconds.isFinite ||
         fixedStepSeconds <= 0 ||
@@ -154,7 +155,7 @@ class PhysicsSceneService {
         ..maxContactConstraints = math.max(4096, maxBodies * 8).toInt()
         ..tempAllocatorBytes = 8 * 1024 * 1024
         ..reportActivation = true
-        ..reportContactStay = false
+        ..reportContactStay = reportContactStay
         ..restitutionCombine = jolt.JJ_COMBINE_DEFAULT;
       for (var layer = 0; layer < jolt.JJ_LAYER_COUNT; layer++) {
         settings.ref.collides[layer] = 0xFFFF;
@@ -174,6 +175,9 @@ class PhysicsSceneService {
   final int maxSubSteps;
   final int collisionSteps;
   final int maxBodies;
+  /// Enables per-step contact-stay events for consumers that maintain
+  /// persistent deformable contact constraints. Disabled by default.
+  final bool reportContactStay;
   late final int _world;
   late final String engineLabel;
   final Map<String, _BodyRecord> _bodies = <String, _BodyRecord>{};
