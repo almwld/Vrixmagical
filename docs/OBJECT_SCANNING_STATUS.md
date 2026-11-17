@@ -29,7 +29,7 @@ The next integration must:
 
 ## Device acceptance
 
-The physical reference target is LG V60 ThinQ 5G (LM-F100). CI tests cannot prove ARCore depth availability, camera/AR lifecycle arbitration, depth registration, thermal behavior or reconstruction quality. Those require a connected physical device and recorded test evidence.
+The physical reference target is LG V60 ThinQ 5G (LM-F100). CI tests cannot prove ARCore depth availability, camera/AR lifecycle arbitration, depth registration, thermal behavior or reconstruction quality. Those require a connected physical device and recorded test evidence. The reconstruction/export path is implemented in source but has not been exercised against a real captured scan or opened in an independent GLB viewer in this workflow.
 
 ## Safety and data handling
 
@@ -51,3 +51,12 @@ Captured photos and masks remain in app-private storage. No scan uploads are per
 ARCore raw-depth images can be reprojected from earlier depth measurements into the current frame; Google documents comparing successive raw-depth image timestamps to detect fresh measurements. Therefore the bridge carries both the current Frame timestamp and the depth Image timestamp, plus an explicit reprojected flag. The invariant is shared Frame identity, not naive equality between the RGB and raw-depth Image timestamps. See the ARCore Raw Depth guide: https://developers.google.com/ar/develop/java/depth/raw-depth.
 
 The Android bridge and Flutter consumer are now wired in source. The CI workflow generates the Android host with `tool/bootstrap_android.sh` before dependency resolution and APK builds, so Kotlin/Gradle compilation is covered by the current PR workflow. This is not proof of physical-device depth support: LG V60 runtime evidence remains required.
+
+
+## Implemented reconstruction code (November 2026)
+
+- `lib/services/object_scan_reconstruction_service.dart` reads persisted RGB-D/mask/pose data and generates world-space masked points across depth-capable views.
+- `lib/services/voxel_mesh_reconstruction.dart` builds a bounded exposed-voxel mesh, exports GLB 2.0 POSITION/NORMAL/index buffers, and exposes a Jolt static triangle-mesh collider bake method.
+- `test/voxel_mesh_reconstruction_test.dart` covers a dense voxel block, sparse/over-budget rejection and GLB header/length.
+- The scan screen exposes reconstruction after the capture session is completed and retains the Jolt world while the scan screen is active.
+- Remaining: higher-quality TSDF/Poisson/BPA reconstruction, watertightness/normal validation on real scans, collider simplification, tetrahedralization for XPBD, dynamic Jolt↔XPBD contact coupling, and physical-device performance/thermal acceptance.
