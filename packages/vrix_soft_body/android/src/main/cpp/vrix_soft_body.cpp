@@ -195,18 +195,26 @@ VRIX_EXPORT void* vrix_soft_body_create(
         }
         tetra.indices[corner] = index;
       }
+      Real volume = signed_volume(
+          body->positions[tetra.indices[0]], body->positions[tetra.indices[1]],
+          body->positions[tetra.indices[2]], body->positions[tetra.indices[3]]);
+      if (!finite(volume) || std::abs(volume) <= static_cast<Real>(1e-9)) {
+        return nullptr;
+      }
+      // The upstream FEM formulation builds Dm from (x1-x4, x2-x4, x3-x4).
+      // Normalize winding so its rest volume is positive and F(rest) == I.
+      if (volume < 0) {
+        std::swap(tetra.indices[0], tetra.indices[1]);
+        volume = -volume;
+      }
       const Vector3r& p0 = body->positions[tetra.indices[0]];
       const Vector3r& p1 = body->positions[tetra.indices[1]];
       const Vector3r& p2 = body->positions[tetra.indices[2]];
       const Vector3r& p3 = body->positions[tetra.indices[3]];
-      const Real volume = signed_volume(p0, p1, p2, p3);
-      if (!finite(volume) || std::abs(volume) <= static_cast<Real>(1e-9)) {
-        return nullptr;
-      }
       Matrix3r rest_matrix;
-      rest_matrix.col(0) = p1 - p0;
-      rest_matrix.col(1) = p2 - p0;
-      rest_matrix.col(2) = p3 - p0;
+      rest_matrix.col(0) = p0 - p3;
+      rest_matrix.col(1) = p1 - p3;
+      rest_matrix.col(2) = p2 - p3;
       if (std::abs(rest_matrix.determinant()) <= static_cast<Real>(1e-9)) {
         return nullptr;
       }
