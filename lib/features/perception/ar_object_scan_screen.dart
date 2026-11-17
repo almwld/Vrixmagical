@@ -14,6 +14,7 @@ import 'package:mediapipe_vision/mediapipe_vision.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../app/app_theme.dart';
+import '../../domain/captured_frame.dart';
 import '../../services/object_scan_store.dart';
 
 /// Captures RGB, calibrated ARCore world pose and a user-refined mask from
@@ -36,6 +37,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   int _maskWidth = 1;
   int _maskHeight = 1;
   List<double>? _cameraPose;
+  CapturedFrame? _capturedFrame;
   double? _promptX;
   double? _promptY;
   final List<Stroke> _strokes = [];
@@ -65,6 +67,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       if (mounted) setState(() => _error = message);
     };
     session.onInitialize(
+      showAnimatedGuide: false,
       showPlanes: false,
       showFeaturePoints: false,
       handleTaps: false,
@@ -84,33 +87,99 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     setState(() {
       _busy = true;
       _error = null;
-      _status = 'جارٍ التقاط الصورة ووضعية الكاميرا من جلسة ARCore…';
+      _status = 'جارٍ انتظار إطار RGB-D متزامن من جلسة ARCore…';
     });
     try {
-      // The plugin exposes the current AR camera pose and a PixelCopy snapshot.
-      // Request pose once per user capture, never from a per-frame timer.
-      final pose = await session.getCameraPose();
-      if (pose == null) {
-        throw StateError('لا توجد وضعية كاميرا موثوقة بعد. حرّك الهاتف وانتظر استقرار التتبع.');
+      // Native bridge samples CPU RGB, pose, intrinsics and depth inside the
+      // same ARCore Frame callback. PixelCopy and a second session.update()
+      // are deliberately not used for reconstruction data.
+      final payload = await session.captureSynchronizedFrame();
+      Map<String, dynamic> asMap(Object? value) =>
+          Map<String, dynamic>.from(value as Map);
+      CameraIntrinsics readIntrinsics(Object? value) {
+        final map = asMap(value);
+        return CameraIntrinsics(
+          fx: (map['fx'] as num).toDouble(),
+          fy: (map['fy'] as num).toDouble(),
+          cx: (map['cx'] as num).toDouble(),
+          cy: (map['cy'] as num).toDouble(),
+          width: (map['width'] as num).toInt(),
+          height: (map['height'] as num).toInt(),
+        );
       }
-      final provider = await session.snapshot();
-      if (provider is! MemoryImage) {
-        throw StateError('صيغة لقطة AR غير مدعومة في هذا النظام.');
+
+      final rgbBytes = payload['rgbBytes'] as Uint8List;
+      final pose = Float64List.fromList(
+        (payload['cameraPose'] as List)
+            .map((value) => (value as num).toDouble())
+            .toList(growable: false),
+      );
+      final depthPayload = payload['depth'] == null
+          ? null
+          : asMap(payload['depth']);
+      DepthFrame? depth;
+      if (depthPayload != null) {
+        final width = (depthPayload['width'] as num).toInt();
+        final height = (depthPayload['height'] as num).toInt();
+        final depthBytes = depthPayload['valuesLittleEndian'] as Uint8List;
+        if (depthBytes.length != width * height * 4) {
+          throw const FormatException('Native depth buffer length does not match its dimensions.');
+        }
+        final data = ByteData.sublistView(depthBytes);
+        final values = Float32List(width * height);
+        for (var i = 0; i < values.length; i++) {
+          values[i] = data.getFloat32(i * 4, Endian.little);
+        }
+        depth = DepthFrame(
+          valuesMeters: values,
+          confidence: depthPayload['confidence'] as Uint8List,
+          width: width,
+          height: height,
+          frameTimestampNs: (payload['frameTimestampNs'] as num).toInt(),
+          imageTimestampNs: (depthPayload['imageTimestampNs'] as num).toInt(),
+          isReprojected: depthPayload['isReprojected'] as bool? ?? false,
+          isRaw: depthPayload['isRaw'] as bool? ?? false,
+          confidenceAvailable: depthPayload['confidenceAvailable'] as bool? ?? false,
+          intrinsics: readIntrinsics(depthPayload['intrinsics']),
+        );
       }
+      final depthSupport = switch (payload['depthSupport']) {
+        'rawOnly' => VrixDepthSupport.rawOnly,
+        'automatic' => VrixDepthSupport.automatic,
+        'unsupported' => VrixDepthSupport.unsupported,
+        _ => VrixDepthSupport.notChecked,
+      };
+      final captured = CapturedFrame(
+        rgbBytes: rgbBytes,
+        frameTimestampNs: (payload['frameTimestampNs'] as num).toInt(),
+        rgbTimestampNs: (payload['rgbTimestampNs'] as num).toInt(),
+        rgbIntrinsics: readIntrinsics(payload['rgbIntrinsics']),
+        cameraPose: pose,
+        trackingState: payload['trackingState'] == 'tracking'
+            ? VrixTrackingState.tracking
+            : VrixTrackingState.paused,
+        depthSupport: depthSupport,
+        depth: depth,
+      );
+      captured.validate();
+
       final support = await getApplicationSupportDirectory();
       final captureDirectory = Directory('${support.path}/vrix_scans/_captures');
       await captureDirectory.create(recursive: true);
-      final path = '${captureDirectory.path}/capture-${DateTime.now().microsecondsSinceEpoch}.png';
+      final path = '${captureDirectory.path}/capture-${DateTime.now().microsecondsSinceEpoch}.jpg';
       final imageFile = File(path);
-      await imageFile.writeAsBytes(provider.bytes, flush: true);
+      await imageFile.writeAsBytes(rgbBytes, flush: true);
 
-      final codec = await ui.instantiateImageCodec(provider.bytes);
-      final frame = await codec.getNextFrame();
-      final width = frame.image.width;
-      final height = frame.image.height;
-      frame.image.dispose();
+      final codec = await ui.instantiateImageCodec(rgbBytes);
+      final imageFrame = await codec.getNextFrame();
+      final width = imageFrame.image.width;
+      final height = imageFrame.image.height;
+      imageFrame.image.dispose();
       codec.dispose();
 
+      if (width != captured.rgbWidth || height != captured.rgbHeight) {
+        throw StateError('Decoded RGB dimensions differ from the ARCore image intrinsics.');
+      }
       final segmenter = await InteractiveSegmenter.create(
         InteractiveSegmenterOptions(model: VisionModels.interactiveSegmenter),
       );
@@ -127,18 +196,21 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         _photoPath = path;
         _imageWidth = width;
         _imageHeight = height;
-        _cameraPose = pose.storage.toList(growable: false);
+        _cameraPose = captured.cameraPose.toList(growable: false);
+        _capturedFrame = captured;
         _maskImage = null;
         _maskWidth = 1;
         _maskHeight = 1;
         _strokes.clear();
         _saved = false;
-        _status = 'المس داخل الجسم لعزله. أضف نقاطاً موجبة أو سالبة لتحسين القناع.';
+        _status = depth == null
+            ? 'تم التقاط RGB مع وضعية معايرة. هذا الجهاز لم يوفّر عمقاً في الإطار الحالي.'
+            : 'تم التقاط RGB وDepth من إطار ARCore واحد. المس داخل الجسم لعزله.';
       });
     } catch (error) {
       if (mounted) setState(() {
         _error = error.toString();
-        _status = 'تعذّر التقاط منظور AR. تحقق من التتبع ثم أعد المحاولة.';
+        _status = 'تعذّر التقاط إطار ARCore متزامن. تحقق من التتبع والعمق ثم أعد المحاولة.';
       });
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -217,9 +289,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final path = _photoPath;
     final mask = _maskImage;
     final pose = _cameraPose;
+    final capturedFrame = _capturedFrame;
     final promptX = _promptX;
     final promptY = _promptY;
-    if (_busy || path == null || mask == null || pose == null || promptX == null || promptY == null) return;
+    if (_busy || path == null || mask == null || pose == null || capturedFrame == null || promptX == null || promptY == null) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -241,6 +314,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         promptX: promptX,
         promptY: promptY,
         cameraPose: pose,
+        cameraPoseSynchronized: true,
+        capturedFrame: capturedFrame,
       ));
       if (mounted) setState(() {
         _saved = true;
@@ -267,7 +342,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       final result = await store.complete();
       if (mounted) setState(() {
         _completed = true;
-        _status = 'اكتمل التقاط ${result.viewCount} مناظير مع وضعيات ARCore. العمق وإعادة البناء لم يبدآ بعد.';
+        _status = 'اكتمل حفظ ${result.viewCount} مناظير RGB-D. إعادة بناء المجسم لم تبدأ بعد.';
       });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -286,6 +361,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     if (mounted) setState(() {
       _photoPath = null;
       _cameraPose = null;
+      _capturedFrame = null;
       _promptX = null;
       _promptY = null;
       _strokes.clear();
@@ -372,7 +448,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                     FilledButton.icon(
                       onPressed: _busy || _saved || _maskImage == null ? null : _saveView,
                       icon: const Icon(Icons.save_alt_rounded),
-                      label: Text(_saved ? 'تم حفظ المنظور' : 'حفظ المنظور مع وضعية الكاميرا'),
+                      label: Text(_saved ? 'تم حفظ المنظور' : 'حفظ المنظور وبيانات RGB-D'),
                     ),
                     Row(
                       children: [
