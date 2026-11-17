@@ -406,13 +406,15 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       _softBodyEngine = softBodyEngine;
       _softBodyHandle = softBodyHandle;
       _softBodySteps = 0;
-      if (softBodyEngine != null && softBodyHandle != null) {
+      final activeSoftBodyEngine = softBodyEngine;
+      final activeSoftBodyHandle = softBodyHandle;
+      if (activeSoftBodyEngine != null && activeSoftBodyHandle != null) {
         _softBodyTicker = Timer.periodic(const Duration(milliseconds: 16), (_) {
           try {
-            softBodyEngine!.step(1 / 60);
+            activeSoftBodyEngine.step(1 / 60);
             _softBodySteps++;
             if (_softBodySteps % 15 == 0) {
-              final state = softBodyEngine.readState(softBodyHandle!);
+              final state = activeSoftBodyEngine.readState(activeSoftBodyHandle);
               if (state.positions.length != result.tetrahedralization.vertexCount * 3) {
                 throw StateError('XPBD state vertex count changed unexpectedly.');
               }
