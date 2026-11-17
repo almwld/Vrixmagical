@@ -25,6 +25,14 @@ class TetrahedralizedScan {
   int get tetrahedronCount => mesh.tetrahedronCount;
   int get vertexCount => mesh.vertexCount;
 
+  List<Vector3> get surfaceVertices => List<Vector3>.generate(
+    mesh.vertexCount,
+    (i) => Vector3(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]),
+    growable: false,
+  );
+
+  List<int> get surfaceTriangleIndices => mesh.surfaceTriangleIndices;
+
   void validateQuality({double minimumSixVolume = 1e-12}) {
     mesh.validate();
     if (!minimumAbsoluteSixVolume.isFinite ||
@@ -107,12 +115,12 @@ class VoxelTetrahedralizer {
 
     // A face shared by two tetrahedra is internal; a face used once is
     // part of the outer surface and becomes the XPBD render surface.
-    final faceUses = <(int, int, int), ({int a, int b, int c, int count})>{};
-    void addFace(int a, int b, int c) {
+    final faceUses = <(int, int, int), ({int a, int b, int c, int opposite, int count})>{};
+    void addFace(int a, int b, int c, int opposite) {
       final sorted = [a, b, c]..sort();
       final key = (sorted[0], sorted[1], sorted[2]);
       final old = faceUses[key];
-      faceUses[key] = (a: old?.a ?? a, b: old?.b ?? b, c: old?.c ?? c, count: (old?.count ?? 0) + 1);
+      faceUses[key] = (a: old?.a ?? a, b: old?.b ?? b, c: old?.c ?? c, opposite: old?.opposite ?? opposite, count: (old?.count ?? 0) + 1);
     }
 
     for (var i = 0; i < tetrahedra.length; i += 4) {
@@ -124,7 +132,22 @@ class VoxelTetrahedralizer {
     }
     final surface = <int>[];
     for (final face in faceUses.values) {
-      if (face.count == 1) surface.addAll([face.a, face.b, face.c]);
+      if (face.count == 1) {
+        final ax = vertices[face.a * 3], ay = vertices[face.a * 3 + 1], az = vertices[face.a * 3 + 2];
+        final bx = vertices[face.b * 3], by = vertices[face.b * 3 + 1], bz = vertices[face.b * 3 + 2];
+        final cx = vertices[face.c * 3], cy = vertices[face.c * 3 + 1], cz = vertices[face.c * 3 + 2];
+        final ox = vertices[face.opposite * 3], oy = vertices[face.opposite * 3 + 1], oz = vertices[face.opposite * 3 + 2];
+        final abx = bx - ax, aby = by - ay, abz = bz - az;
+        final acx = cx - ax, acy = cy - ay, acz = cz - az;
+        final dot = (aby * acz - abz * acy) * (ox - ax) +
+            (abz * acx - abx * acz) * (oy - ay) +
+            (abx * acy - aby * acx) * (oz - az);
+        if (dot > 0) {
+          surface.addAll([face.a, face.c, face.b]);
+        } else {
+          surface.addAll([face.a, face.b, face.c]);
+        }
+      }
       if (face.count > 2) {
         throw StateError('Non-manifold tetrahedral face has more than two incident elements.');
       }
