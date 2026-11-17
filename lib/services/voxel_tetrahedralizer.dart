@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:vector_math/vector_math_64.dart';
-import 'package:vrix_soft_body/src/soft_body_contract.dart';
+import 'package:vrix_soft_body/vrix_soft_body.dart' show SoftBodyMeshData;
 
 /// Conforming structured-grid tetrahedralization for voxel occupancy.
 ///
