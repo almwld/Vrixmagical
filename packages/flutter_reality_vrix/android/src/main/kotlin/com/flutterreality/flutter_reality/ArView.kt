@@ -705,10 +705,15 @@ class ArView(
         var rgb: Image?=null; var depth: Image?=null; var confidence: Image?=null
         try {
             rgb=frame.acquireCameraImage()
+            val rgbWidth = rgb.width
+            val rgbHeight = rgb.height
             val nv21=copyYuv(rgb)
             val camera=frame.camera; val intr=camera.imageIntrinsics
             val f=intr.focalLength; val c=intr.principalPoint; val d=intr.imageDimensions
-            val rgbIntr=intrinsicsMap(f[0],f[1],c[0],c[1],d[0],d[1])
+            if (d[0] != rgbWidth || d[1] != rgbHeight) {
+                throw IllegalStateException("ARCore CPU image dimensions do not match image intrinsics")
+            }
+            val rgbIntr=intrinsicsMap(f[0],f[1],c[0],c[1],rgbWidth,rgbHeight)
             var raw=false; var depthCopy: DepthCopy?=null
             try {
                 depth=frame.acquireRawDepthImage16Bits(); raw=true
@@ -724,7 +729,7 @@ class ArView(
             pendingScanResult=null
             mainScope.launch(Dispatchers.Default) {
                 try {
-                    val jpeg=encodeYuv(nv21,d[0],d[1])
+                    val jpeg=encodeYuv(nv21,rgbWidth,rgbHeight)
                     val depthMap: Map<String,Any>?=depthCopy?.let { q -> mapOf(
                         "width" to q.width,"height" to q.height,"imageTimestampNs" to q.imageTimestampNs,
                         "isRaw" to q.isRaw,"isReprojected" to q.isReprojected,
