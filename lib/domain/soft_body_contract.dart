@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 /// Solver-independent data contracts for VRIX deformable objects.
 ///
 /// Coordinates are object-local metres. The native solver owns simulation
