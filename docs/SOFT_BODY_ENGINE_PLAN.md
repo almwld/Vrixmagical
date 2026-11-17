@@ -23,7 +23,8 @@ No component is considered integrated merely because its source exists in this r
 - Evidence: maintained C++ library with a dedicated `PositionBasedDynamics/XPBD.h/.cpp`; its API includes XPBD distance constraints, tetrahedral volume preservation and FEM tetrahedral constraints with Young's modulus, Poisson ratio and inversion handling.
 - Scope fit: the best first candidate for the XPBD/FEM solver core. It already implements the mathematical primitives VRIX needs; do not write a parallel solver.
 - Build caveat: upstream root CMake builds additional projects and fetches Discregrid and GenericParameters, while the solver library itself is a separate CMake target and depends on Eigen3. Android integration should build the minimal library target with pinned Eigen and NDK toolchain, not the desktop demos or full root project.
-- Gate before vendoring: pin a reviewed commit; verify Eigen version/ABI, Android arm64-v8a and armeabi-v7a compilation, exception/RTTI/visibility settings, and preserve upstream test sources and license. Confirm no required transitive component was omitted from the minimal target.
+- Test provenance: the upstream repository tree currently exposes no dedicated unit-test target/folder. Do not claim an upstream test suite is retained where none is present. Preserve its solver demos/examples as upstream behavioral references, and add VRIX regression tests around the imported API (tetra volume, FEM response, inversion handling, determinism and bounded stepping). These are adapter/integration checks, not a replacement solver.
+- Gate before vendoring: pin a reviewed commit; verify Eigen version/ABI, Android arm64-v8a and armeabi-v7a compilation, exception/RTTI/visibility settings, and preserve the upstream license and relevant examples. Confirm no required transitive component was omitted from the minimal target.
 
 ### Secondary reference: SOFA
 
