@@ -16,9 +16,9 @@
 #endif
 
 namespace {
-using PBD::Matrix3r;
-using PBD::Real;
-using PBD::Vector3r;
+using ::Matrix3r;
+using ::Real;
+using ::Vector3r;
 
 struct Tetrahedron {
   std::array<uint32_t, 4> indices{};
