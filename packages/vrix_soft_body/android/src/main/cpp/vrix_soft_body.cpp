@@ -118,6 +118,7 @@ void solve_substep(Body& body) {
           static_cast<Real>(0), static_cast<Real>(0), stiffness, dt,
           target.lambda, correction_vertex, correction_target);
       body.positions[i] += correction_vertex;
+      (void)correction_target;
     }
   }
 
