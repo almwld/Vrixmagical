@@ -34,6 +34,16 @@ struct PointTarget {
   Real lambda = 0;
 };
 
+struct ContactConstraint {
+  bool active = false;
+  Vector3r point = Vector3r::Zero();
+  Vector3r normal = Vector3r::UnitY();
+  Vector3r lambda_tangent = Vector3r::Zero();
+  Real friction = 0;
+  Real compliance = 0;
+  Real lambda_normal = 0;
+};
+
 struct Body {
   std::vector<Vector3r> positions;
   std::vector<Vector3r> previous;
@@ -41,6 +51,8 @@ struct Body {
   std::vector<Real> inverse_masses;
   std::vector<Tetrahedron> tetrahedra;
   std::vector<PointTarget> targets;
+  std::vector<ContactConstraint> contacts;
+  std::vector<Vector3r> reaction_forces;
   Real youngs_modulus = 25000;
   Real poisson_ratio = 0.35;
   Real damping = 0.02;
@@ -120,6 +132,46 @@ void solve_substep(Body& body) {
       body.positions[i] += correction_vertex;
       (void)correction_target;
     }
+
+    // Unilateral XPBD contact: the soft vertex may move away from the rigid
+    // surface, but the accumulated normal multiplier can never become tensile.
+    for (size_t i = 0; i < body.contacts.size(); ++i) {
+      ContactConstraint& contact = body.contacts[i];
+      const Real inverse_mass = body.inverse_masses[i];
+      if (!contact.active || inverse_mass <= static_cast<Real>(0)) continue;
+      const Real alpha = contact.compliance / (dt * dt);
+      const Real constraint =
+          (body.positions[i] - contact.point).dot(contact.normal);
+      const Real delta_lambda =
+          (-constraint - alpha * contact.lambda_normal) /
+          (inverse_mass + alpha);
+      const Real next_lambda =
+          std::max(static_cast<Real>(0),
+                   contact.lambda_normal + delta_lambda);
+      const Real applied_lambda = next_lambda - contact.lambda_normal;
+      contact.lambda_normal = next_lambda;
+      body.positions[i] +=
+          inverse_mass * applied_lambda * contact.normal;
+
+      // Position-level Coulomb friction. The tangential multiplier is clamped
+      // by mu * lambda_n, preventing an unbounded sticky contact.
+      const Vector3r displacement = body.positions[i] - body.previous[i];
+      const Vector3r tangent =
+          displacement - contact.normal * displacement.dot(contact.normal);
+      const Real tangent_length = tangent.norm();
+      if (contact.friction > 0 && tangent_length > static_cast<Real>(1e-9)) {
+        Vector3r candidate =
+            contact.lambda_tangent - tangent / inverse_mass;
+        const Real maximum = contact.friction * contact.lambda_normal;
+        const Real candidate_length = candidate.norm();
+        if (candidate_length > maximum && candidate_length > 0) {
+          candidate *= maximum / candidate_length;
+        }
+        const Vector3r delta_tangent = candidate - contact.lambda_tangent;
+        contact.lambda_tangent = candidate;
+        body.positions[i] += inverse_mass * delta_tangent;
+      }
+    }
   }
 
   for (size_t i = 0; i < body.positions.size(); ++i) {
@@ -131,6 +183,13 @@ void solve_substep(Body& body) {
   }
   for (PointTarget& target : body.targets) {
     if (target.active) target.lambda = 0;
+  }
+  for (size_t i = 0; i < body.contacts.size(); ++i) {
+    const ContactConstraint& contact = body.contacts[i];
+    if (!contact.active) continue;
+    body.reaction_forces[i] +=
+        -(contact.lambda_normal * contact.normal +
+          contact.lambda_tangent) / (dt * dt);
   }
 }
 }  // namespace
@@ -175,6 +234,9 @@ VRIX_EXPORT void* vrix_soft_body_create(
     body->velocities.resize(static_cast<size_t>(vertex_count), Vector3r::Zero());
     body->inverse_masses.resize(static_cast<size_t>(vertex_count), 0);
     body->targets.resize(static_cast<size_t>(vertex_count));
+    body->contacts.resize(static_cast<size_t>(vertex_count));
+    body->reaction_forces.resize(static_cast<size_t>(vertex_count),
+                                 Vector3r::Zero());
 
     body->youngs_modulus = static_cast<Real>(youngs_modulus_pa);
     body->poisson_ratio = static_cast<Real>(poisson_ratio);
@@ -282,6 +344,67 @@ VRIX_EXPORT int vrix_soft_body_set_point_target(
   point.compliance = static_cast<Real>(compliance);
   point.lambda = 0;
   return 1;
+}
+
+VRIX_EXPORT int vrix_soft_body_set_contact(
+    void* handle, int vertex_index, const float* point_xyz,
+    const float* normal_xyz, float friction, float compliance) {
+  auto* body = static_cast<Body*>(handle);
+  if (body == nullptr || body->disposed || point_xyz == nullptr ||
+      normal_xyz == nullptr || vertex_index < 0 ||
+      vertex_index >= static_cast<int>(body->positions.size()) ||
+      !std::isfinite(friction) || friction < 0 ||
+      !std::isfinite(compliance) || compliance < 0) {
+    return 0;
+  }
+  Vector3r point(static_cast<Real>(point_xyz[0]),
+                 static_cast<Real>(point_xyz[1]),
+                 static_cast<Real>(point_xyz[2]));
+  Vector3r normal(static_cast<Real>(normal_xyz[0]),
+                  static_cast<Real>(normal_xyz[1]),
+                  static_cast<Real>(normal_xyz[2]));
+  const Real normal_length = normal.norm();
+  if (!point.allFinite() || !normal.allFinite() ||
+      !finite(normal_length) || normal_length <= static_cast<Real>(1e-8)) {
+    return 0;
+  }
+  ContactConstraint& contact =
+      body->contacts[static_cast<size_t>(vertex_index)];
+  contact.active = true;
+  contact.point = point;
+  contact.normal = normal / normal_length;
+  contact.friction = static_cast<Real>(friction);
+  contact.compliance = static_cast<Real>(compliance);
+  contact.lambda_normal = 0;
+  contact.lambda_tangent.setZero();
+  return 1;
+}
+
+VRIX_EXPORT int vrix_soft_body_clear_contact(void* handle, int vertex_index) {
+  auto* body = static_cast<Body*>(handle);
+  if (body == nullptr || body->disposed || vertex_index < 0 ||
+      vertex_index >= static_cast<int>(body->contacts.size())) {
+    return 0;
+  }
+  body->contacts[static_cast<size_t>(vertex_index)] = ContactConstraint{};
+  return 1;
+}
+
+VRIX_EXPORT int vrix_soft_body_read_reaction_forces(
+    void* handle, float* forces_xyz, int capacity) {
+  auto* body = static_cast<Body*>(handle);
+  if (body == nullptr || body->disposed || forces_xyz == nullptr ||
+      capacity < static_cast<int>(body->reaction_forces.size())) {
+    return 0;
+  }
+  for (size_t i = 0; i < body->reaction_forces.size(); ++i) {
+    for (int axis = 0; axis < 3; ++axis) {
+      forces_xyz[i * 3 + static_cast<size_t>(axis)] =
+          static_cast<float>(body->reaction_forces[i][axis]);
+    }
+    body->reaction_forces[i].setZero();
+  }
+  return static_cast<int>(body->reaction_forces.size());
 }
 
 VRIX_EXPORT int vrix_soft_body_clear_point_target(void* handle,
