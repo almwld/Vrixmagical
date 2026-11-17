@@ -19,6 +19,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Native XPBD solver regression
+        run: |
+          cmake -S packages/vrix_soft_body/android/src/main/cpp -B /tmp/vrix-soft-body-native \
+            -DVRIX_SOFT_BODY_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/vrix-soft-body-native --parallel 2
+          ctest --test-dir /tmp/vrix-soft-body-native --output-on-failure
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
