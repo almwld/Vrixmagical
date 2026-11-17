@@ -12,6 +12,7 @@ import 'package:flutter_reality/managers/ar_session_manager.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:vrix_soft_body/vrix_soft_body.dart';
 
 import '../../app/app_theme.dart';
 import '../../domain/captured_frame.dart';
@@ -47,6 +48,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   bool _saved = false;
   bool _completed = false;
   PhysicsSceneService? _physicsScene;
+  VrixSoftBodyFfiEngine? _softBodyEngine;
+  SoftBodyHandle? _softBodyHandle;
+  Timer? _softBodyTicker;
+  int _softBodySteps = 0;
   ObjectScanReconstructionResult? _reconstruction;
   String _status = 'حرّك الهاتف ببطء حتى يستقر تتبع ARCore، ثم التقط المنظور الأول.';
   String? _error;
@@ -372,11 +377,58 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         physics.dispose();
         rethrow;
       }
+      VrixSoftBodyFfiEngine? softBodyEngine;
+      SoftBodyHandle? softBodyHandle;
+      String softBodyStatus = 'محرك XPBD غير متاح على هذا التشغيل.';
+      try {
+        softBodyEngine = VrixSoftBodyFfiEngine.open();
+        softBodyHandle = softBodyEngine.createBody(
+          mesh: result.tetrahedralization.mesh,
+          material: const SoftBodyMaterial(),
+          config: const SoftBodySolverConfig(),
+        );
+        // Prime the native solver and validate that it returns a complete
+        // state before advertising the body as initialized.
+        softBodyEngine.step(1 / 60);
+        final initialState = softBodyEngine.readState(softBodyHandle);
+        if (initialState.positions.length != result.tetrahedralization.vertexCount * 3) {
+          throw StateError('XPBD returned a state with an unexpected vertex count.');
+        }
+        softBodyStatus = 'XPBD يعمل؛ العرض المرئي للتشوه وربط التلامس مع Jolt ما زالا منفصلين.';
+      } catch (error) {
+        softBodyEngine?.dispose();
+        softBodyEngine = null;
+        softBodyHandle = null;
+        softBodyStatus = 'لم يبدأ XPBD: $error';
+      }
+      _softBodyTicker?.cancel();
+      _softBodyEngine?.dispose();
+      _softBodyEngine = softBodyEngine;
+      _softBodyHandle = softBodyHandle;
+      _softBodySteps = 0;
+      if (softBodyEngine != null && softBodyHandle != null) {
+        _softBodyTicker = Timer.periodic(const Duration(milliseconds: 16), (_) {
+          try {
+            softBodyEngine!.step(1 / 60);
+            _softBodySteps++;
+            if (_softBodySteps % 15 == 0) {
+              final state = softBodyEngine.readState(softBodyHandle!);
+              if (state.positions.length != result.tetrahedralization.vertexCount * 3) {
+                throw StateError('XPBD state vertex count changed unexpectedly.');
+              }
+              if (mounted) setState(() {});
+            }
+          } catch (error) {
+            _softBodyTicker?.cancel();
+            if (mounted) setState(() => _error = 'توقفت محاكاة XPBD: $error');
+          }
+        });
+      }
       _physicsScene?.dispose();
       _physicsScene = physics;
       if (mounted) setState(() {
         _reconstruction = result;
-        _status = 'تم إنشاء GLB ومعاينة Collider ثابتة عبر Jolt. المثلثات: ${result.mesh.triangleCount} · النقاط: ${result.inputPointCount}. يلزم فحص جودة السطح على الجهاز قبل اعتماده.';
+        _status = 'تم إنشاء GLB وJolt Collider. عناصر XPBD: ${result.tetrahedralization.tetrahedronCount} · ${softBodyStatus} المثلثات: ${result.mesh.triangleCount} · النقاط: ${result.inputPointCount}.';
       });
     } catch (error) {
       if (mounted) setState(() {
@@ -414,6 +466,9 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     if (segmenter != null) unawaited(segmenter.dispose());
     final session = _session;
     if (session != null) unawaited(session.dispose());
+    _softBodyTicker?.cancel();
+    _softBodyEngine?.dispose();
+    _physicsScene?.dispose();
     super.dispose();
   }
 
@@ -515,6 +570,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       icon: const Icon(Icons.view_in_ar_rounded),
                       label: const Text('إعادة بناء Mesh وتصدير GLB وCollider'),
                     ),
+                  if (_reconstruction != null)
+                    Text('XPBD steps: $_softBodySteps · Tetrahedra: ${_reconstruction!.tetrahedralization.tetrahedronCount}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppColors.success, fontSize: 10)),
                   if (_reconstruction != null)
                     Text('ملف GLB: ${_reconstruction!.glbFile.path}',
                       textAlign: TextAlign.center,
