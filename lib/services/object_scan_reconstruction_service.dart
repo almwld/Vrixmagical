@@ -8,6 +8,7 @@ import 'package:vector_math/vector_math_64.dart';
 import '../domain/captured_frame.dart';
 import 'object_scan_store.dart';
 import 'voxel_mesh_reconstruction.dart';
+import 'voxel_tetrahedralizer.dart';
 
 class ObjectScanReconstructionResult {
   const ObjectScanReconstructionResult({
@@ -163,11 +164,17 @@ class ObjectScanReconstructionService {
       maximumOccupiedVoxels: 10000,
       maximumSurfaceFaces: 25000,
     );
+    final tetrahedralization = const VoxelTetrahedralizer().tetrahedralize(
+      fused,
+      voxelSizeMeters: voxelSizeMeters,
+      maximumOccupiedVoxels: 10000,
+      maximumTetrahedra: 60000,
+    );
     final glb = File('${session.directory.path}/reconstruction.glb');
     await mesh.exportGlb(glb);
 
     manifest['reconstruction'] = {
-      'status': 'voxel_surface_preview',
+      'status': 'voxel_surface_preview_with_tetrahedral_volume',
       'algorithm': 'world-space-voxel-occupancy-boundary',
       'isPhotogrammetry': false,
       'isProductionSurface': false,
@@ -178,7 +185,7 @@ class ObjectScanReconstructionService {
       'inputPoints': allPoints.length,
       'fusedPoints': fused.length,
       'vertices': mesh.vertices.length,
-      'triangles': mesh.triangleCount,
+      'triangles': mesh.triangleCount,\n      'tetrahedralization': {\n        'status': 'validated_structured_voxel_tetrahedra',\n        'vertices': tetrahedralization.vertexCount,\n        'tetrahedra': tetrahedralization.tetrahedronCount,\n        'boundaryTriangles': tetrahedralization.boundaryFaceCount,\n        'minimumSixVolume': tetrahedralization.minimumAbsoluteSixVolume,\n        'maximumSixVolume': tetrahedralization.maximumAbsoluteSixVolume,\n        'solverReady': true,\n        'note': 'Structured voxel tetrahedralization; not constrained-Delaunay or quality-optimized for arbitrary boundaries.',\n      },
       'voxelSizeMeters': voxelSizeMeters,
       'note': 'Conservative voxel surface and static collider preview. Validate scan coverage and geometry on-device before production use.',
     };
