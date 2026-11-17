@@ -53,6 +53,7 @@ struct Body {
   std::vector<PointTarget> targets;
   std::vector<ContactConstraint> contacts;
   std::vector<Vector3r> reaction_forces;
+  std::vector<uint32_t> reaction_samples;
   Real youngs_modulus = 25000;
   Real poisson_ratio = 0.35;
   Real damping = 0.02;
@@ -95,6 +96,12 @@ void solve_substep(Body& body) {
   }
 
   for (Tetrahedron& tetra : body.tetrahedra) tetra.lambda = 0;
+  // XPBD multipliers are accumulated within one fixed timestep only.
+  for (ContactConstraint& contact : body.contacts) {
+    if (!contact.active) continue;
+    contact.lambda_normal = 0;
+    contact.lambda_tangent.setZero();
+  }
 
   for (int iteration = 0; iteration < body.iterations; ++iteration) {
     for (Tetrahedron& tetra : body.tetrahedra) {
@@ -190,6 +197,7 @@ void solve_substep(Body& body) {
     body.reaction_forces[i] +=
         -(contact.lambda_normal * contact.normal +
           contact.lambda_tangent) / (dt * dt);
+    ++body.reaction_samples[i];
   }
 }
 }  // namespace
@@ -237,6 +245,7 @@ VRIX_EXPORT void* vrix_soft_body_create(
     body->contacts.resize(static_cast<size_t>(vertex_count));
     body->reaction_forces.resize(static_cast<size_t>(vertex_count),
                                  Vector3r::Zero());
+    body->reaction_samples.resize(static_cast<size_t>(vertex_count), 0);
 
     body->youngs_modulus = static_cast<Real>(youngs_modulus_pa);
     body->poisson_ratio = static_cast<Real>(poisson_ratio);
@@ -399,10 +408,14 @@ VRIX_EXPORT int vrix_soft_body_read_reaction_forces(
   }
   for (size_t i = 0; i < body->reaction_forces.size(); ++i) {
     for (int axis = 0; axis < 3; ++axis) {
-      forces_xyz[i * 3 + static_cast<size_t>(axis)] =
-          static_cast<float>(body->reaction_forces[i][axis]);
+      const uint32_t samples = body->reaction_samples[i];
+      forces_xyz[i * 3 + static_cast<size_t>(axis)] = samples == 0
+          ? 0.0f
+          : static_cast<float>(body->reaction_forces[i][axis] /
+                               static_cast<Real>(samples));
     }
     body->reaction_forces[i].setZero();
+    body->reaction_samples[i] = 0;
   }
   return static_cast<int>(body->reaction_forces.size());
 }
