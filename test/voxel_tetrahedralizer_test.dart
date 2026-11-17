@@ -14,7 +14,7 @@ void main() {
       expect(result.vertexCount, 8);
       expect(result.boundaryFaceCount, 12);
       expect(result.mesh.triangleCount, 12);
-      expect(result.mesh.positions.reduce((a, b) => a + b, 0) / result.mesh.positions.length, closeTo(0, 1e-9));
+      expect(result.mesh.positions.fold<double>(0, (a, b) => a + b) / result.mesh.positions.length, closeTo(0, 1e-9));
       result.validateQuality();
     });
 
