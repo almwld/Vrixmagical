@@ -70,11 +70,11 @@ class ObjectLibraryCatalog {
   final List<CatalogAsset> assets;
 
   static Future<ObjectLibraryCatalog> load({
-    AssetBundle bundle = rootBundle,
+    AssetBundle? bundle,
     String manifestPath = 'assets/models/manifest.json',
   }) async {
-    final raw = await bundle.loadString(manifestPath);
-    return decode(raw);
+    final raw = await (bundle ?? rootBundle).loadString(manifestPath);
+    return ObjectLibraryCatalog.decode(raw);
   }
 
   factory ObjectLibraryCatalog.decode(String raw) {
@@ -132,7 +132,7 @@ class ObjectLibraryStore {
 
   static Future<ObjectLibraryStore> open({
     Directory? supportDirectory,
-    AssetBundle bundle = rootBundle,
+    AssetBundle? bundle,
     String manifestPath = 'assets/models/manifest.json',
   }) async {
     final root = supportDirectory ?? await getApplicationSupportDirectory();
@@ -140,7 +140,7 @@ class ObjectLibraryStore {
     final file = File('${root.path}/object_library.json');
     final raw = await file.exists()
         ? await file.readAsString()
-        : await bundle.loadString(manifestPath);
+        : await (bundle ?? rootBundle).loadString(manifestPath);
     return ObjectLibraryStore._(root, ObjectLibraryCatalog.decode(raw), file);
   }
 
