@@ -9,6 +9,8 @@ void* vrix_soft_body_create(const float*, int, const uint32_t*, int,
 int vrix_soft_body_step(void*, float);
 int vrix_soft_body_set_point_target(void*, int, const float*, float);
 int vrix_soft_body_read_state(void*, float*, float*, int);
+int vrix_soft_body_set_contact(void*, int, const float*, const float*, float, float);
+int vrix_soft_body_read_reaction_forces(void*, float*, int);
 void vrix_soft_body_destroy(void*);
 }
 
@@ -84,6 +86,36 @@ int main() {
     std::fprintf(stderr, "XPBD point target did not converge.\n");
     vrix_soft_body_destroy(body);
     return 7;
+  }
+
+  const float contact_point[] = {0.9f, 0.0f, 0.0f};
+  const float contact_normal[] = {-1.0f, 0.0f, 0.0f};
+  if (vrix_soft_body_set_contact(body, 1, contact_point, contact_normal,
+                                 0.4f, 0.0f) != 1) {
+    std::fprintf(stderr, "XPBD rejected a valid unilateral contact.\\n");
+    vrix_soft_body_destroy(body);
+    return 8;
+  }
+  for (int frame = 0; frame < 30; ++frame) {
+    if (vrix_soft_body_step(body, 1.0f / 60.0f) < 1) {
+      std::fprintf(stderr, "XPBD failed while resolving surface contact.\\n");
+      vrix_soft_body_destroy(body);
+      return 9;
+    }
+  }
+  if (vrix_soft_body_read_state(body, positions.data(), velocities.data(), 4) != 4 ||
+      positions[3] > 0.94f || !finite_state(positions) ||
+      !finite_state(velocities)) {
+    std::fprintf(stderr, "XPBD contact did not prevent vertex penetration.\\n");
+    vrix_soft_body_destroy(body);
+    return 10;
+  }
+  std::vector<float> reactions(12);
+  if (vrix_soft_body_read_reaction_forces(body, reactions.data(), 4) != 4 ||
+      !finite_state(reactions) || reactions[3] <= 0.0f) {
+    std::fprintf(stderr, "XPBD did not return a finite rigid-surface reaction.\\n");
+    vrix_soft_body_destroy(body);
+    return 11;
   }
 
   vrix_soft_body_destroy(body);
