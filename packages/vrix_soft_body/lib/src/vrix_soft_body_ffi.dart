@@ -32,11 +32,11 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
   VrixSoftBodyFfiEngine._(DynamicLibrary library)
       : _create = library.lookupFunction<_CreateNative, _CreateDart>('vrix_soft_body_create'),
         _step = library.lookupFunction<_StepNative, _StepDart>('vrix_soft_body_step'),
-        _setTarget = _library.lookupFunction<_TargetNative, _TargetDart>('vrix_soft_body_set_point_target'),
-        _clearTarget = _library.lookupFunction<_ClearTargetNative, _ClearTargetDart>('vrix_soft_body_clear_point_target'),
-        _readState = _library.lookupFunction<_ReadNative, _ReadDart>('vrix_soft_body_read_state'),
-        _destroy = _library.lookupFunction<_DestroyNative, _DestroyDart>('vrix_soft_body_destroy'),
-        backendName = _library.lookupFunction<_NameNative, _NameDart>('vrix_soft_body_backend_name')().cast<Utf8>().toDartString();
+        _setTarget = library.lookupFunction<_TargetNative, _TargetDart>('vrix_soft_body_set_point_target'),
+        _clearTarget = library.lookupFunction<_ClearTargetNative, _ClearTargetDart>('vrix_soft_body_clear_point_target'),
+        _readState = library.lookupFunction<_ReadNative, _ReadDart>('vrix_soft_body_read_state'),
+        _destroy = library.lookupFunction<_DestroyNative, _DestroyDart>('vrix_soft_body_destroy'),
+        backendName = library.lookupFunction<_NameNative, _NameDart>('vrix_soft_body_backend_name')().cast<Utf8>().toDartString();
 
   factory VrixSoftBodyFfiEngine.open({DynamicLibrary? library}) {
     final loaded = library ?? _openPlatformLibrary();
