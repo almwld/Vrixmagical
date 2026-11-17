@@ -13,6 +13,7 @@ import 'voxel_tetrahedralizer.dart';
 class ObjectScanReconstructionResult {
   const ObjectScanReconstructionResult({
     required this.mesh,
+    required this.tetrahedralization,
     required this.glbFile,
     required this.inputViewCount,
     required this.inputPointCount,
@@ -20,6 +21,7 @@ class ObjectScanReconstructionResult {
   });
 
   final ReconstructedVoxelMesh mesh;
+  final TetrahedralizedScan tetrahedralization;
   final File glbFile;
   final int inputViewCount;
   final int inputPointCount;
@@ -185,7 +187,17 @@ class ObjectScanReconstructionService {
       'inputPoints': allPoints.length,
       'fusedPoints': fused.length,
       'vertices': mesh.vertices.length,
-      'triangles': mesh.triangleCount,\n      'tetrahedralization': {\n        'status': 'validated_structured_voxel_tetrahedra',\n        'vertices': tetrahedralization.vertexCount,\n        'tetrahedra': tetrahedralization.tetrahedronCount,\n        'boundaryTriangles': tetrahedralization.boundaryFaceCount,\n        'minimumSixVolume': tetrahedralization.minimumAbsoluteSixVolume,\n        'maximumSixVolume': tetrahedralization.maximumAbsoluteSixVolume,\n        'solverReady': true,\n        'note': 'Structured voxel tetrahedralization; not constrained-Delaunay or quality-optimized for arbitrary boundaries.',\n      },
+      'triangles': mesh.triangleCount,
+      'tetrahedralization': {
+        'status': 'validated_structured_voxel_tetrahedra',
+        'vertices': tetrahedralization.vertexCount,
+        'tetrahedra': tetrahedralization.tetrahedronCount,
+        'boundaryTriangles': tetrahedralization.boundaryFaceCount,
+        'minimumSixVolume': tetrahedralization.minimumAbsoluteSixVolume,
+        'maximumSixVolume': tetrahedralization.maximumAbsoluteSixVolume,
+        'solverIntegrated': false,
+        'note': 'Structured voxel tetrahedralization; not constrained-Delaunay or quality-optimized for arbitrary boundaries.',
+      },
       'voxelSizeMeters': voxelSizeMeters,
       'note': 'Conservative voxel surface and static collider preview. Validate scan coverage and geometry on-device before production use.',
     };
@@ -194,6 +206,7 @@ class ObjectScanReconstructionService {
     await temporary.rename(session.manifestPath);
     return ObjectScanReconstructionResult(
       mesh: mesh,
+      tetrahedralization: tetrahedralization,
       glbFile: glb,
       inputViewCount: views.length,
       inputPointCount: allPoints.length,
