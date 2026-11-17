@@ -59,8 +59,10 @@ jobs:
       - name: Verify formatting
         run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib
 
-      - name: Analyze
-        run: flutter analyze --no-fatal-infos
+      - name: Analyze app and native plugin Dart API
+        run: |
+          flutter analyze --no-fatal-infos
+          dart analyze packages/vrix_soft_body
 
       - name: Unit and widget tests
         run: flutter test --reporter expanded
