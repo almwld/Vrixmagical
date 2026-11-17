@@ -44,4 +44,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    // Keep Kotlin bytecode aligned with the Android Java 17 toolchain.
+    kotlinOptions {
+        jvmTarget = '17'
+    }
 }
