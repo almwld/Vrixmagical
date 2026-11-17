@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:vector_math/vector_math_64.dart';
 
-import '../domain/soft_body_contract.dart';
+import 'package:vrix_soft_body/vrix_soft_body.dart';
 import 'physics_scene_service.dart';
 
 /// Couples one XPBD deformable mesh to Jolt through a kinematic convex proxy.
@@ -58,7 +58,7 @@ class CoupledSoftBodyPhysics {
   }
 
   final PhysicsSceneService scene;
-  final VrixSoftBodyEngine engine;
+  final VrixSoftBodyFfiEngine engine;
   final SoftBodyHandle softBody;
   final SoftBodyMeshData mesh;
   final String proxyBodyId;
@@ -228,8 +228,7 @@ class CoupledSoftBodyPhysics {
     return result / mesh.vertexCount.toDouble();
   }
 
-  String _contactKey(String bodyId, Vector3 point) =>
-      '$bodyId:${(point.x * 1000).round()}:${(point.y * 1000).round()}:${(point.z * 1000).round()}';
+  String _contactKey(String bodyId, Vector3 point) => bodyId;
 
   void _ensureActive() {
     if (_disposed) throw StateError('Coupled soft-body physics has been disposed.');
