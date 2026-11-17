@@ -60,3 +60,11 @@ target_link_options(vrix_soft_body PRIVATE "-Wl,-z,max-page-size=16384")
 target_compile_definitions(vrix_soft_body PRIVATE
   VRIX_PBD_UPSTREAM_REVISION="10a70bc146a97873dc3c8fef372f5217e010542e"
 )
+
+option(VRIX_SOFT_BODY_BUILD_TESTS "Build the host-side XPBD integration regression test" OFF)
+if(VRIX_SOFT_BODY_BUILD_TESTS)
+  enable_testing()
+  add_executable(vrix_soft_body_smoke_test tests/soft_body_solver_smoke.cpp)
+  target_link_libraries(vrix_soft_body_smoke_test PRIVATE vrix_soft_body)
+  add_test(NAME vrix_soft_body_smoke_test COMMAND vrix_soft_body_smoke_test)
+endif()
