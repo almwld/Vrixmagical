@@ -84,6 +84,9 @@ The native XPBD backend now exposes per-vertex unilateral surface-contact constr
 - Tangential positional friction is clamped by the Coulomb bound `mu * lambda_normal`; it is not a fluid/adhesion model.
 - `vrix_soft_body_read_reaction_forces` returns the accumulated opposite contact reaction in newtons, packed XYZ per vertex, and clears the readback.
 - Dart FFI exposes set/clear contact and reaction readback. Position, velocity, and reaction native buffers are allocated once per body and reused for reads; Dart result lists are still copied for API safety.
+- Contact multipliers are reset at each fixed XPBD substep (not carried across timesteps). Reaction-force readback averages the samples accumulated since the previous read, then clears its per-vertex sample counters; this keeps the reported unit as newtons when the UI polls less frequently than the solver steps.
+- Native regression coverage now also clears an active contact and verifies that stale reaction forces do not survive contact removal.
+- `PhysicsSceneService.applyImpulseAtPoint` now exposes Jolt's generated `JPH_BodyInterface_AddImpulse2` binding for dynamic bodies. It accepts a world-space point and impulse, so Jolt can generate angular response as well as linear response.
 
 The native host smoke test now exercises a penetrating vertex against a plane, checks finite state/non-penetration, and verifies a finite reaction force.
 
