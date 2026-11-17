@@ -724,7 +724,7 @@ class PhysicsSceneService {
         record.handle,
         position,
         rotation,
-        jolt.JPH_Activation_Activate,
+        jolt.JPH_Activation.JPH_Activation_Activate,
       );
       if (resetVelocity && record.motionType == jolt.JJ_MOTION_DYNAMIC) {
         final zero = arena<jolt.JPH_Vec3>();
@@ -819,7 +819,7 @@ class PhysicsSceneService {
       bodyInterface,
       record.handle,
       motionType,
-      jolt.JPH_Activation_Activate,
+      jolt.JPH_Activation.JPH_Activation_Activate,
     );
     final gravityFactor = kinematic ? 0.0 : 1.0;
     jolt.JPH_BodyInterface_SetGravityFactor(
