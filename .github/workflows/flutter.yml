@@ -40,7 +40,14 @@ jobs:
 
       - name: Verify local XPBD plugin resolution
         run: |
-          grep -A5 '^  vrix_soft_body:' .dart_tool/package_config.json
+          python - <<'PY'
+          import json
+          with open(".dart_tool/package_config.json", encoding="utf-8") as stream:
+              packages = json.load(stream)["packages"]
+          plugin = next((item for item in packages if item["name"] == "vrix_soft_body"), None)
+          assert plugin is not None, "vrix_soft_body path plugin was not resolved"
+          print("Resolved vrix_soft_body:", plugin["rootUri"])
+          PY
           test -s packages/vrix_soft_body/android/src/main/cpp/CMakeLists.txt
           test -s packages/vrix_soft_body/android/src/main/cpp/vrix_soft_body.cpp
 
