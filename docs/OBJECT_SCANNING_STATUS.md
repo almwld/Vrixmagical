@@ -50,4 +50,4 @@ Captured photos and masks remain in app-private storage. No scan uploads are per
 
 ARCore raw-depth images can be reprojected from earlier depth measurements into the current frame; Google documents comparing successive raw-depth image timestamps to detect fresh measurements. Therefore the bridge carries both the current Frame timestamp and the depth Image timestamp, plus an explicit reprojected flag. The invariant is shared Frame identity, not naive equality between the RGB and raw-depth Image timestamps. See the ARCore Raw Depth guide: https://developers.google.com/ar/develop/java/depth/raw-depth.
 
-The Android bridge and Flutter consumer are now wired in source. This is not yet proof of a successful Android build or physical-device depth support: those gates remain pending CI and LG V60 runtime evidence.
+The Android bridge and Flutter consumer are now wired in source. The CI workflow generates the Android host with `tool/bootstrap_android.sh` before dependency resolution and APK builds, so Kotlin/Gradle compilation is covered by the current PR workflow. This is not proof of physical-device depth support: LG V60 runtime evidence remains required.
