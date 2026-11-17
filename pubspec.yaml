@@ -9,7 +9,8 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   camera: ^0.12.2
-  flutter_reality: ^0.1.0
+  flutter_reality:
+    path: packages/flutter_reality_vrix
   just_jolt: ^0.2.0
   ffi: ^2.1.4
   material_ui: ^1.11.0

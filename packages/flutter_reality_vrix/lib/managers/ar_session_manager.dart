@@ -1,0 +1,223 @@
+import 'dart:math' show sqrt;
+import 'dart:typed_data';
+
+import 'package:flutter_reality/datatypes/config_planedetection.dart';
+import 'package:flutter_reality/models/ar_anchor.dart';
+import 'package:flutter_reality/models/ar_hittest_result.dart';
+import 'package:flutter_reality/src/generated/messages.g.dart';
+import 'package:flutter_reality/utils/json_converters.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:vector_math/vector_math_64.dart';
+
+// Type definitions to enforce a consistent use of the API
+/// Signature for [ARSessionManager.onPlaneOrPointTap]: receives the hit-test
+/// results for a tap that landed on a tracked plane or feature point.
+typedef ARHitResultHandler = void Function(List<ARHitTestResult> hits);
+
+/// Signature for [ARSessionManager.onPlaneDetected]: receives the current
+/// total number of tracked planes whenever a new one is detected.
+typedef ARPlaneResultHandler = void Function(int planeCount);
+
+/// Signature for [ARSessionManager.onError]: receives a human-readable
+/// description of a native session error.
+typedef ErrorHandler = void Function(String error);
+
+/// Manages the session configuration, parameters and events of an [ARView]
+class ARSessionManager {
+  late ARSessionHostApi _hostApi;
+  late MethodChannel _scanChannel;
+
+  /// Debugging status flag. If true, all platform calls are printed. Defaults to false.
+  final bool debug;
+
+  /// Context of the [ARView] widget that this manager is attributed to
+  final BuildContext buildContext;
+
+  /// Determines the types of planes ARCore and ARKit should show
+  final PlaneDetectionConfig planeDetectionConfig;
+
+  /// Receives hit results from user taps with tracked planes or feature points
+  ARHitResultHandler? onPlaneOrPointTap;
+
+  /// Receives total number of Planes when a plane is detected and added to the view
+  ARPlaneResultHandler? onPlaneDetected;
+
+  /// Callback that is triggered once error is triggered
+  ErrorHandler? onError;
+
+  /// Creates the session manager for the [ARView] platform view identified
+  /// by [id]. This is called by [createManagers] once the native view has
+  /// been created; consumers normally receive an already-constructed
+  /// instance through [ARViewCreatedCallback] rather than calling this
+  /// directly.
+  ARSessionManager(int id, this.buildContext, this.planeDetectionConfig,
+      {this.debug = false}) {
+    final suffix = id.toString();
+    _hostApi = ARSessionHostApi(messageChannelSuffix: suffix);
+    _scanChannel = MethodChannel('flutter_reality/scan_$suffix');
+    ARSessionFlutterApi.setUp(
+      _SessionEventHandler(this),
+      messageChannelSuffix: suffix,
+    );
+    if (debug) {
+      print("ARSessionManager initialized");
+    }
+  }
+
+  /// Captures RGB, pose, intrinsics and depth from the same ARCore Frame callback.
+  Future<Map<String, dynamic>> captureSynchronizedFrame() async {
+    final result = await _scanChannel.invokeMapMethod<String, dynamic>('captureSynchronizedFrame');
+    if (result == null || result['rgbBytes'] is! Uint8List) {
+      throw StateError('Invalid synchronized ARCore frame payload.');
+    }
+    return result;
+  }
+
+  /// Returns the camera pose in Matrix4 format with respect to the world coordinate system of the [ARView]
+  Future<Matrix4?> getCameraPose() async {
+    try {
+      final pose = await _hostApi.getCameraPose();
+      return MatrixConverter().fromJson(pose.matrix);
+    } catch (e) {
+      print('Error caught: ' + e.toString());
+      return null;
+    }
+  }
+
+  /// Returns the given anchor pose in Matrix4 format with respect to the world coordinate system of the [ARView]
+  Future<Matrix4?> getPose(ARAnchor anchor) async {
+    try {
+      if (anchor.name.isEmpty) {
+        throw Exception("Anchor can not be resolved. Anchor name is empty.");
+      }
+      final pose = await _hostApi.getAnchorPose(anchor.name);
+      return MatrixConverter().fromJson(pose.matrix);
+    } catch (e) {
+      print('Error caught: ' + e.toString());
+      return null;
+    }
+  }
+
+  /// Returns the distance in meters between @anchor1 and @anchor2.
+  Future<double?> getDistanceBetweenAnchors(
+      ARAnchor anchor1, ARAnchor anchor2) async {
+    var anchor1Pose = await getPose(anchor1);
+    var anchor2Pose = await getPose(anchor2);
+    var anchor1Translation = anchor1Pose?.getTranslation();
+    var anchor2Translation = anchor2Pose?.getTranslation();
+    if (anchor1Translation != null && anchor2Translation != null) {
+      return getDistanceBetweenVectors(anchor1Translation, anchor2Translation);
+    } else {
+      return null;
+    }
+  }
+
+  /// Returns the distance in meters between @anchor and device's camera.
+  Future<double?> getDistanceFromAnchor(ARAnchor anchor) async {
+    Matrix4? cameraPose = await getCameraPose();
+    Matrix4? anchorPose = await getPose(anchor);
+    Vector3? cameraTranslation = cameraPose?.getTranslation();
+    Vector3? anchorTranslation = anchorPose?.getTranslation();
+    if (anchorTranslation != null && cameraTranslation != null) {
+      return getDistanceBetweenVectors(anchorTranslation, cameraTranslation);
+    } else {
+      return null;
+    }
+  }
+
+  /// Returns the distance in meters between @vector1 and @vector2.
+  double getDistanceBetweenVectors(Vector3 vector1, Vector3 vector2) {
+    num dx = vector1.x - vector2.x;
+    num dy = vector1.y - vector2.y;
+    num dz = vector1.z - vector2.z;
+    double distance = sqrt(dx * dx + dy * dy + dz * dz);
+    return distance;
+  }
+
+  /// Pauses the native AR session and hides the camera feed.
+  Future<void> disableCamera() => _hostApi.disableCamera();
+
+  /// Resumes the native AR session and shows the camera feed again.
+  Future<void> enableCamera() => _hostApi.enableCamera();
+
+  /// Shows or hides the visualization of detected planes.
+  Future<void> showPlanes(bool showPlanes) => _hostApi.showPlanes(showPlanes);
+
+  /// Function to initialize the platform-specific AR view. Can be used to initially set or update session settings.
+  /// [customPlaneTexturePath] refers to flutter assets from the app that is calling this function, NOT to assets within this plugin. Make sure
+  /// the assets are correctly registered in the pubspec.yaml of the parent app (e.g. the ./example app in this plugin's repo)
+  Future<void> onInitialize({
+    bool showAnimatedGuide = true,
+    bool showFeaturePoints = false,
+    bool showPlanes = true,
+    String? customPlaneTexturePath,
+    bool showWorldOrigin = false,
+    bool handleTaps = true,
+    bool handlePans = false, // nodes are not draggable by default
+    bool handleRotation = false, // nodes can not be rotated by default
+  }) {
+    return _hostApi.initialize(SessionConfigMessage(
+      showAnimatedGuide: showAnimatedGuide,
+      showFeaturePoints: showFeaturePoints,
+      planeDetectionConfig: planeDetectionConfig.index,
+      showPlanes: showPlanes,
+      customPlaneTexturePath: customPlaneTexturePath,
+      showWorldOrigin: showWorldOrigin,
+      handleTaps: handleTaps,
+      handlePans: handlePans,
+      handleRotation: handleRotation,
+    ));
+  }
+
+  /// Dispose the AR view on the platforms to pause the scenes and disconnect the platform handlers.
+  /// You should call this before removing the AR view to prevent out of memory erros
+  Future<void> dispose() => _hostApi.dispose();
+
+  /// Returns a future ImageProvider that contains a screenshot of the current AR Scene
+  Future<ImageProvider> snapshot() async {
+    final result = await _hostApi.snapshot();
+    return MemoryImage(result);
+  }
+}
+
+/// Forwards Pigeon-generated `ARSessionFlutterApi` callbacks to
+/// [ARSessionManager]'s public callback fields. Kept as a separate class
+/// because the callback field names (`onError`, `onPlaneDetected`, ...) are
+/// intentionally identical to the interface method names, which a class
+/// can't both declare as a field and implement as a method.
+class _SessionEventHandler implements ARSessionFlutterApi {
+  _SessionEventHandler(this._manager);
+
+  final ARSessionManager _manager;
+
+  @override
+  void onError(String message) {
+    if (_manager.onError != null) {
+      _manager.onError!(message);
+      print(message);
+    } else {
+      ScaffoldMessenger.of(_manager.buildContext).showSnackBar(SnackBar(
+          content: Text(message),
+          action: SnackBarAction(
+              label: 'HIDE',
+              onPressed: ScaffoldMessenger.of(_manager.buildContext)
+                  .hideCurrentSnackBar)));
+    }
+  }
+
+  @override
+  void onPlaneDetected(int count) => _manager.onPlaneDetected?.call(count);
+
+  @override
+  void onPlaneOrPointTap(List<HitTestResultMessage> hits) {
+    final hitTestResults = hits
+        .map((hit) => ARHitTestResult(
+              const ARHitTestResultTypeConverter().fromJson(hit.type),
+              hit.distance,
+              MatrixConverter().fromJson(hit.worldTransform),
+            ))
+        .toList();
+    _manager.onPlaneOrPointTap?.call(hitTestResults);
+  }
+}
