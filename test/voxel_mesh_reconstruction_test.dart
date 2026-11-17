@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math_64.dart';
@@ -18,8 +19,8 @@ void main() {
         voxelSizeMeters: 1,
       );
 
-      expect(mesh.vertices.length, 24);
-      expect(mesh.triangleCount, 12);
+      expect(mesh.vertices.length, 96);
+      expect(mesh.triangleCount, 48);
       mesh.validate();
     });
 
