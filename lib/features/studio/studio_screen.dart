@@ -2,7 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../app/app_theme.dart';
 import '../hand/hand_mirror_screen.dart';
 import '../perception/scene_analysis_screen.dart';
-import '../perception/interactive_cutout_screen.dart';
+import '../perception/ar_object_scan_screen.dart';
 import '../reconstruction/gaussian_splat_screen.dart';
 import 'ar_scene_screen.dart';
 
@@ -83,11 +83,11 @@ class StudioScreen extends StatelessWidget {
         ),
         _StudioTool(
           icon: Icons.content_cut_rounded,
-          title: 'العزل التفاعلي الدقيق',
-          description: 'المس العنصر لتحديده، وأضف نقاط استبعاد لتنقية القناع.',
-          technology: 'INTERACTIVE SEGMENTER · MAGICTOUCH',
+          title: 'مسح الأجسام الحقيقي عبر ARCore',
+          description: 'التقط صوراً من جلسة AR نفسها، واعزل الجسم واحفظ وضعية الكاميرا لكل منظور.',
+          technology: 'ARCORE POSE · RGB CAPTURE · MEDIAPIPE MASK',
           color: const Color(0xFF9C9BFF),
-          onTap: () => _open(context, const InteractiveCutoutScreen()),
+          onTap: () => _open(context, const ArObjectScanScreen()),
         ),
         _StudioTool(
           icon: Icons.center_focus_strong_rounded,

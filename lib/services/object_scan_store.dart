@@ -1,0 +1,250 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:path_provider/path_provider.dart';
+
+import '../domain/captured_frame.dart';
+
+/// One captured RGB view, foreground mask and optional calibrated RGB-D frame.
+/// Persisting capture data never implies that a reconstructed mesh exists.
+class ObjectScanView {
+  ObjectScanView({
+    required this.imageFile,
+    required this.maskPng,
+    required this.width,
+    required this.height,
+    this.maskWidth,
+    this.maskHeight,
+    this.cameraPose,
+    this.cameraPoseSynchronized = false,
+    this.capturedFrame,
+    required this.promptX,
+    required this.promptY,
+    DateTime? capturedAt,
+  }) : capturedAt = capturedAt ?? DateTime.now();
+
+  final File imageFile;
+  final List<int> maskPng;
+  final int width;
+  final int height;
+  final int? maskWidth;
+  final int? maskHeight;
+  /// Candidate column-major world-from-camera transform (16 finite values).
+  /// It is trusted for reconstruction only when [cameraPoseSynchronized] is true.
+  final List<double>? cameraPose;
+  final bool cameraPoseSynchronized;
+  final CapturedFrame? capturedFrame;
+  final double promptX;
+  final double promptY;
+  final DateTime capturedAt;
+
+  void validate() {
+    if (width < 1 || height < 1 || width > 12000 || height > 12000) {
+      throw const FormatException('Scan image dimensions are invalid.');
+    }
+    if ((maskWidth != null && (maskWidth! < 1 || maskWidth! > 12000)) ||
+        (maskHeight != null && (maskHeight! < 1 || maskHeight! > 12000))) {
+      throw const FormatException('Scan mask dimensions are invalid.');
+    }
+    if (cameraPose != null &&
+        (cameraPose!.length != 16 || cameraPose!.any((value) => !value.isFinite))) {
+      throw const FormatException('AR camera pose must be a finite 4x4 matrix.');
+    }
+    if (capturedFrame != null) {
+      capturedFrame!.validate();
+      if (capturedFrame!.rgbWidth != width || capturedFrame!.rgbHeight != height) {
+        throw const FormatException('CapturedFrame RGB dimensions must match the stored source image.');
+      }
+      if (cameraPoseSynchronized != true || cameraPose == null) {
+        throw const FormatException('A synchronized frame must provide its trusted camera pose.');
+      }
+    }
+    if (maskPng.length < 8) {
+      throw const FormatException('A non-empty PNG foreground mask is required.');
+    }
+    if (!promptX.isFinite || !promptY.isFinite ||
+        promptX < 0 || promptX > 1 || promptY < 0 || promptY > 1) {
+      throw const FormatException('The segmentation prompt must be normalized.');
+    }
+  }
+}
+
+class ObjectScanSession {
+  const ObjectScanSession({
+    required this.id,
+    required this.displayName,
+    required this.directory,
+    required this.viewCount,
+    required this.isComplete,
+  });
+
+  final String id;
+  final String displayName;
+  final Directory directory;
+  final int viewCount;
+  final bool isComplete;
+
+  String get manifestPath => '${directory.path}/scan_manifest.json';
+}
+
+/// Durable multi-view capture store. It saves source photos and transparent
+/// masks separately, then atomically updates a versioned manifest.
+class ObjectScanStore {
+  ObjectScanStore._(this._directory, this._manifest, this.id, this.displayName);
+
+  final Directory _directory;
+  final File _manifest;
+  final String id;
+  final String displayName;
+  final List<Map<String, Object?>> _views = [];
+  final DateTime _createdAt = DateTime.now().toUtc();
+  bool _complete = false;
+
+  int get viewCount => _views.length;
+  Directory get directory => _directory;
+
+  static Future<ObjectScanStore> create({
+    required String displayName,
+    Directory? rootDirectory,
+  }) async {
+    final name = displayName.trim();
+    if (name.isEmpty || name.length > 80) {
+      throw const FormatException('Scan name must contain 1–80 characters.');
+    }
+    final root = rootDirectory ?? await getApplicationSupportDirectory();
+    final id = 'scan-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    final directory = Directory('${root.path}/vrix_scans/$id');
+    await directory.create(recursive: true);
+    final store = ObjectScanStore._(
+      directory,
+      File('${directory.path}/scan_manifest.json'),
+      id,
+      name,
+    );
+    await store._writeManifest();
+    return store;
+  }
+
+  Future<void> addView(ObjectScanView view) async {
+    if (_complete) throw StateError('This scan session is already complete.');
+    view.validate();
+    if (!await view.imageFile.exists()) {
+      throw const FileSystemException('Captured source image does not exist.');
+    }
+    if (_views.length >= 80) {
+      throw StateError('A scan session is limited to 80 views.');
+    }
+
+    final index = _views.length + 1;
+    final extension = view.imageFile.path.toLowerCase().endsWith('.png')
+        ? 'png'
+        : 'jpg';
+    final imageName = 'view_${index.toString().padLeft(3, '0')}.$extension';
+    final maskName = 'mask_${index.toString().padLeft(3, '0')}.png';
+    final imageTarget = File('${_directory.path}/$imageName');
+    final maskTarget = File('${_directory.path}/$maskName');
+    final depth = view.capturedFrame?.depth;
+    final depthName = depth == null ? null : 'depth_${index.toString().padLeft(3, '0')}.f32le';
+    final confidenceName = depth == null ? null : 'confidence_${index.toString().padLeft(3, '0')}.u8';
+    final depthTarget = depthName == null ? null : File('${_directory.path}/$depthName');
+    final confidenceTarget = confidenceName == null ? null : File('${_directory.path}/$confidenceName');
+    await view.imageFile.copy(imageTarget.path);
+    try {
+      await maskTarget.writeAsBytes(view.maskPng, flush: true);
+      if (depth != null && depthTarget != null && confidenceTarget != null) {
+        final depthData = ByteData(depth.valuesMeters.length * 4);
+        for (var i = 0; i < depth.valuesMeters.length; i++) {
+          depthData.setFloat32(i * 4, depth.valuesMeters[i], Endian.little);
+        }
+        await depthTarget.writeAsBytes(depthData.buffer.asUint8List(), flush: true);
+        await confidenceTarget.writeAsBytes(depth.confidence, flush: true);
+      }
+      _views.add({
+        'index': index,
+        'image': imageName,
+        'mask': maskName,
+        'width': view.width,
+        'height': view.height,
+        'maskWidth': view.maskWidth,
+        'maskHeight': view.maskHeight,
+        'capturedAt': view.capturedAt.toUtc().toIso8601String(),
+        'prompt': {'x': view.promptX, 'y': view.promptY},
+        // Legacy getCameraPose() and PixelCopy are separate calls. Never
+        // expose this candidate as calibrated reconstruction input.
+        'cameraPose': view.cameraPoseSynchronized ? view.cameraPose : null,
+        'cameraPoseCandidate': view.cameraPose,
+        'cameraPoseStatus': view.cameraPose == null
+            ? 'unavailable'
+            : (view.cameraPoseSynchronized ? 'synchronized' : 'unverified-unsynchronized'),
+        'cameraPoseConvention': view.cameraPose == null ? null : 'column-major-world-from-camera-meters',
+        'frameTimestampNs': view.capturedFrame?.frameTimestampNs,
+        'rgbTimestampNs': view.capturedFrame?.rgbTimestampNs,
+        'rgbIntrinsics': view.capturedFrame?.rgbIntrinsics.toJson(),
+        'depthMap': depth == null ? null : {
+          'file': depthName,
+          'confidenceFile': confidenceName,
+          'width': depth.width,
+          'height': depth.height,
+          'frameTimestampNs': depth.frameTimestampNs,
+          'imageTimestampNs': depth.imageTimestampNs,
+          'isRaw': depth.isRaw,
+          'isReprojected': depth.isReprojected,
+          'confidenceAvailable': depth.confidenceAvailable,
+          'intrinsics': depth.intrinsics.toJson(),
+          'encoding': 'float32-little-endian-meters',
+        },
+      });
+      await _writeManifest();
+    } catch (_) {
+      if (_views.isNotEmpty && _views.last['index'] == index) _views.removeLast();
+      if (await imageTarget.exists()) await imageTarget.delete();
+      if (await maskTarget.exists()) await maskTarget.delete();
+      if (depthTarget != null && await depthTarget.exists()) await depthTarget.delete();
+      if (confidenceTarget != null && await confidenceTarget.exists()) await confidenceTarget.delete();
+      rethrow;
+    }
+  }
+
+  Future<ObjectScanSession> complete() async {
+    if (_views.length < 3) {
+      throw StateError('Capture at least three distinct views before completing a scan.');
+    }
+    _complete = true;
+    await _writeManifest();
+    return snapshot;
+  }
+
+  ObjectScanSession get snapshot => ObjectScanSession(
+        id: id,
+        displayName: displayName,
+        directory: _directory,
+        viewCount: viewCount,
+        isComplete: _complete,
+      );
+
+  Future<void> _writeManifest() async {
+    final payload = <String, Object?>{
+      'schemaVersion': 3,
+      'id': id,
+      'displayName': displayName,
+      'source': 'captured',
+      'captureKind': _views.any((view) => view['depthMap'] != null)
+          ? 'masked-multiview-rgbd'
+          : 'masked-multiview-rgb',
+      'createdAt': _createdAt.toIso8601String(),
+      'updatedAt': DateTime.now().toUtc().toIso8601String(),
+      'status': _complete ? 'captured' : 'collecting',
+      'viewCount': _views.length,
+      'reconstruction': {
+        'status': 'not_started',
+        'output': null,
+        'note': 'Synchronized RGB-D frames and masks are persisted when device depth is available. Point-cloud fusion, mesh generation and collider baking have not yet run.',
+      },
+      'views': _views,
+    };
+    final temporary = File('${_manifest.path}.tmp');
+    await temporary.writeAsString(jsonEncode(payload), flush: true);
+    await temporary.rename(_manifest.path);
+  }
+}

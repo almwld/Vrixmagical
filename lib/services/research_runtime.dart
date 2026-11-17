@@ -365,7 +365,7 @@ class ResearchRuntimeCapabilities {
   const ResearchRuntimeCapabilities({
     this.edgeSam = const RuntimeCapability(RuntimeCapabilityState.fallback, 'MediaPipe fallback; EdgeSAM model/runtime not bundled.'),
     this.depth = const RuntimeCapability(RuntimeCapabilityState.notProbed, 'ARCore depth bridge is not installed in the generated Android host.'),
-    this.physics = const RuntimeCapability(RuntimeCapabilityState.fallback, 'Fixed-step scene motion is available; native collision solving is not integrated.'),
+    this.physics = const RuntimeCapability(RuntimeCapabilityState.notProbed, 'Jolt rigid-body adapter is wired to the AR scene; native device startup and coordinate calibration are not yet verified.'),
     this.reconstruction = const RuntimeCapability(RuntimeCapabilityState.unsupported, 'Capture metadata is available; mobile SLAM/point-cloud/splat reconstruction is not implemented.'),
     this.splatAdvanced = const RuntimeCapability(RuntimeCapabilityState.notProbed, 'Pinned SplatKit beta.3 viewer is present; advanced tileset/collider APIs have not been runtime-probed.'),
     this.voice = const RuntimeCapability(RuntimeCapabilityState.unsupported, 'Typed scene command schema is available; speech recognition is not integrated.'),

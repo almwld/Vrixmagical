@@ -9,7 +9,12 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   camera: ^0.12.2
-  flutter_reality: ^0.1.0
+  flutter_reality:
+    path: packages/flutter_reality_vrix
+  vrix_soft_body:
+    path: packages/vrix_soft_body
+  just_jolt: ^0.2.0
+  ffi: ^2.1.4
   material_ui: ^1.11.0
   file_picker: ^13.3.3
   path_provider: ^2.1.5
@@ -20,12 +25,16 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  pigeon: ^29.0.2
 flutter:
   uses-material-design: true
   assets:
     - assets/mediapipe/
+    - assets/models/
 hooks:
   user_defines:
     mediapipe_vision:
       tasks: [hand_landmarker, object_detector, image_segmenter, interactive_segmenter]
       models: [hand_landmarker, object_detector, image_segmenter, interactive_segmenter]
+    just_jolt:
+      build: true

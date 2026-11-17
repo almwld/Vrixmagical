@@ -9,12 +9,24 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: flutter-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze-test-build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
+      - name: Native XPBD solver regression
+        run: |
+          cmake -S packages/vrix_soft_body/android/src/main/cpp -B /tmp/vrix-soft-body-native \
+            -DVRIX_SOFT_BODY_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/vrix-soft-body-native --parallel 2
+          ctest --test-dir /tmp/vrix-soft-body-native --output-on-failure
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -26,23 +38,32 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Verify native SplatKit dependency
+      - name: Verify local XPBD plugin resolution
         run: |
-          cd android
-          ./gradlew :app:dependencyInsight --dependency splatkit-android --configuration debugCompileClasspath | tee /tmp/splatkit-dependency.txt
-          grep -F 'io.github.xget7:splatkit-android:0.1.0-beta.3' /tmp/splatkit-dependency.txt
+          python - <<'PY'
+          import json
+          with open(".dart_tool/package_config.json", encoding="utf-8") as stream:
+              packages = json.load(stream)["packages"]
+          plugin = next((item for item in packages if item["name"] == "vrix_soft_body"), None)
+          assert plugin is not None, "vrix_soft_body path plugin was not resolved"
+          print("Resolved vrix_soft_body:", plugin["rootUri"])
+          PY
+          test -s packages/vrix_soft_body/android/src/main/cpp/CMakeLists.txt
+          test -s packages/vrix_soft_body/android/src/main/cpp/vrix_soft_body.cpp
 
       - name: Bundle pinned MediaPipe models
         run: dart run mediapipe_core:bundle_models
 
       - name: Format source
-        run: dart format lib test
+        run: dart format lib test packages/vrix_soft_body/lib
 
       - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed lib test
+        run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib
 
-      - name: Analyze
-        run: flutter analyze
+      - name: Analyze app and native plugin Dart API
+        run: |
+          flutter analyze --no-fatal-infos
+          dart analyze packages/vrix_soft_body
 
       - name: Unit and widget tests
         run: flutter test --reporter expanded
@@ -55,5 +76,52 @@ jobs:
         with:
           name: virxmagical-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify native libraries in debug APK
+        run: |
+          unzip -Z1 build/app/outputs/flutter-apk/app-debug.apk | tee /tmp/debug-apk-files.txt
+          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/debug-apk-files.txt
+          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/debug-apk-files.txt
+
+      - name: Android release APK
+        run: flutter build apk --release
+
+      - name: Verify native libraries in release APK
+        run: |
+          unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
+          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-apk-files.txt
+          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-apk-files.txt
+
+      - name: Android split release APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Verify split APK outputs and native libraries
+        run: |
+          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
+          ARM64_APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          test -s "$ARM64_APK"
+          unzip -Z1 "$ARM64_APK" | tee /tmp/split-arm64-files.txt
+          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/split-arm64-files.txt
+          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/split-arm64-files.txt
+
+      - name: Android release App Bundle
+        run: flutter build appbundle --release
+
+      - name: Verify native libraries in release bundle
+        run: |
+          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
+          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
+          grep -F 'base/lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-aab-files.txt
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-release-apk-and-aab
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-*-release.apk
+            build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 14
