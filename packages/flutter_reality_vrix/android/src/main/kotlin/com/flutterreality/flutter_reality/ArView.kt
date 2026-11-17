@@ -704,28 +704,37 @@ class ArView(
         if(frame.camera.trackingState!=TrackingState.TRACKING) return
         var rgb: Image?=null; var depth: Image?=null; var confidence: Image?=null
         try {
-            rgb=frame.acquireCameraImage()
-            val rgbWidth = rgb.width
-            val rgbHeight = rgb.height
-            val nv21=copyYuv(rgb)
+            val cameraImage = frame.acquireCameraImage()
+            rgb = cameraImage
+            val rgbWidth = cameraImage.width
+            val rgbHeight = cameraImage.height
+            val nv21=copyYuv(cameraImage)
             val camera=frame.camera; val intr=camera.imageIntrinsics
             val f=intr.focalLength; val c=intr.principalPoint; val d=intr.imageDimensions
             if (d[0] != rgbWidth || d[1] != rgbHeight) {
                 throw IllegalStateException("ARCore CPU image dimensions do not match image intrinsics")
             }
             val rgbIntr=intrinsicsMap(f[0],f[1],c[0],c[1],rgbWidth,rgbHeight)
-            var raw=false; var depthCopy: DepthCopy?=null
-            try {
-                depth=frame.acquireRawDepthImage16Bits(); raw=true
-                confidence=try { frame.acquireRawDepthConfidenceImage() } catch(_:Exception){null}
-            } catch(_:Exception) {
-                depth=try { frame.acquireDepthImage16Bits() } catch(_:Exception){null}
+            var raw=false
+            var depthCopy: DepthCopy?=null
+            val rawImage = try { frame.acquireRawDepthImage16Bits() } catch(_:Exception) { null }
+            if (rawImage != null) {
+                depth = rawImage
+                raw = true
+                val rawConfidence = try { frame.acquireRawDepthConfidenceImage() } catch(_:Exception) { null }
+                confidence = rawConfidence
+                depthCopy = copyDepth(frame, rawImage, rawConfidence, true)
+            } else {
+                val automaticImage = try { frame.acquireDepthImage16Bits() } catch(_:Exception) { null }
+                if (automaticImage != null) {
+                    depth = automaticImage
+                    depthCopy = copyDepth(frame, automaticImage, null, false)
+                }
             }
-            if(depth!=null) depthCopy=copyDepth(frame,depth,confidence,raw)
             if(depthCopy==null && depthSupportStatus!="unsupported") return
-            val frameTs=frame.timestamp; val rgbTs=rgb.timestamp
+            val frameTs=frame.timestamp; val rgbTs=cameraImage.timestamp
             val pose=serializePose(camera.pose).toList()
-            rgb.close(); rgb=null; depth?.close(); depth=null; confidence?.close(); confidence=null
+            cameraImage.close(); rgb=null; depth?.close(); depth=null; confidence?.close(); confidence=null
             pendingScanResult=null
             mainScope.launch(Dispatchers.Default) {
                 try {
