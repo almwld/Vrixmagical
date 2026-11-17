@@ -224,7 +224,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         break;
       case 'touchThreshold':
         final value = data['value'];
-        if (value is num) _touchThreshold = value.toDouble().clamp(0.0, 1.0);
+        if (value is num) _touchThreshold = value.toDouble().clamp(0.0, 1.0).toDouble();
         break;
       case 'handTrackingInfo':
         setState(() { _status = 'MediaPipe يعمل حالياً في وحدة مرآة اليد؛ لم يُدمج بعد داخل جلسة AR لتجنب تعارض الكاميرا.'; });
