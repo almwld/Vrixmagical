@@ -6,9 +6,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../domain/captured_frame.dart';
 
-/// A single RGB view and its foreground mask from one object-scan session.
-/// Camera pose/depth are deliberately nullable until the ARCore bridge supplies
-/// calibrated measurements; a photo-only bundle must never masquerade as a mesh.
+/// One captured RGB view, foreground mask and optional calibrated RGB-D frame.
+/// Persisting capture data never implies that a reconstructed mesh exists.
 class ObjectScanView {
   ObjectScanView({
     required this.imageFile,
