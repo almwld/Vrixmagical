@@ -17,15 +17,19 @@ The vendored package `packages/flutter_reality_vrix` configures `RAW_DEPTH_ONLY`
 
 The legacy plugin `getCameraPose()` still exists for compatibility, but the scanner no longer calls it. The new MethodChannel request is fulfilled on a later rendered frame and does not call `session.update()` again.
 
-## Explicitly not yet implemented
+## Reconstruction and simulation status
 
-The scanner now persists synchronized RGB-D capture data when depth is available, together with segmentation masks and trusted per-frame poses. It still does **not** create a point cloud, mesh, GLB or collider automatically; reconstruction status remains `not_started` until those stages are integrated and validated.
+The source now implements a bounded RGB-D reconstruction path: it reloads persisted synchronized frames, aligns depth and masks, projects masked points, fuses them into voxels, creates a voxel-derived surface, exports GLB 2.0, and bakes a static Jolt triangle-mesh collider. A structured tetrahedral volume is also generated from the fused occupancy and returned as `SoftBodyMeshData`.
 
-The next integration must:
-1. Compile and run the vendored VRIX fork on an Android build, then verify frame payload and depth capability on the physical LG V60; no second camera/session or extra `session.update()` is used.
-2. Register RGB/mask/depth in one coordinate system, including image rotation/crop and depth-to-color UV mapping; reject non-tracking or low-confidence frames.
-3. Fuse masked depth into a bounded point cloud, filter outliers, estimate normals and generate a mesh/collider. Gaussian Splat reconstruction remains a separate visual output path.
-4. Add EdgeSAM Android ONNX inference only after model licensing is cleared, the model SHA-256 is verified, and Android runtime compatibility is tested. MediaPipe remains the on-device fallback.
+The scan screen passes that local-space tetrahedral mesh into the native `VrixSoftBodyFfiEngine`, creates an XPBD body, performs an initial step/state read, and advances the native solver while the scan screen remains active. This confirms source-level solver wiring; it does **not** yet render the deformed vertices, exchange contacts/impulses with Jolt, or establish stable simulation quality on a physical scan. The manifest deliberately records `solverIntegrated: false` because the scan artifact is not a proof of a validated coupled simulation.
+
+The following remain incomplete:
+1. Higher-quality TSDF/Poisson/BPA or equivalent surface reconstruction and robust scan cleanup.
+2. Rendering the live XPBD state as a deformed surface and synchronizing its collider.
+3. Dynamic Jolt↔XPBD contact/impulse coupling and stable two-way interaction.
+4. Tetrahedral element quality optimization beyond non-zero volume and conforming face incidence.
+5. Independent GLB viewer validation, scan-to-ground-truth accuracy, and real-device performance/thermal acceptance.
+6. EdgeSAM Android ONNX inference only after licensing, model hash, and runtime compatibility are verified; MediaPipe remains the fallback.
 
 ## Device acceptance
 
@@ -59,14 +63,14 @@ The Android bridge and Flutter consumer are now wired in source. The CI workflow
 - `lib/services/voxel_mesh_reconstruction.dart` builds a bounded exposed-voxel mesh, exports GLB 2.0 POSITION/NORMAL/index buffers, and exposes a Jolt static triangle-mesh collider bake method.
 - `test/voxel_mesh_reconstruction_test.dart` covers a dense voxel block, sparse/over-budget rejection and GLB header/length.
 - The scan screen exposes reconstruction after the capture session is completed and retains the Jolt world while the scan screen is active.
-- Remaining: higher-quality TSDF/Poisson/BPA reconstruction, watertightness/normal validation on real scans, collider simplification, tetrahedralization for XPBD, dynamic Jolt↔XPBD contact coupling, and physical-device performance/thermal acceptance.
+- Remaining: higher-quality TSDF/Poisson/BPA reconstruction, watertightness/normal validation on real scans, collider simplification, live XPBD deformation rendering, dynamic Jolt↔XPBD contact coupling, and physical-device performance/thermal acceptance.
 
 
 ## Tetrahedral volume and indexed boundary (follow-up)
 
-- `lib/services/voxel_tetrahedralizer.dart` now creates a conforming structured tetrahedral volume from the fused occupied voxels: six tetrahedra per voxel, shared lattice vertices, a shared-face incidence map, rejection of non-manifold faces, and non-zero rest-volume checks.
+- `lib/services/voxel_tetrahedralizer.dart` now creates a conforming structured tetrahedral volume from the fused occupied voxels: six tetrahedra per voxel, shared lattice vertices, a shared-face incidence map, rejection of non-manifold faces, non-zero rest-volume checks, and centering into object-local metres for the XPBD contract.
 - The boundary is extracted from singly incident tetrahedral faces, oriented outward using each element's opposite vertex, and exported as an indexed surface. The same indexed boundary is used by the static Jolt collider path.
 - `test/voxel_tetrahedralizer_test.dart` checks one-voxel and adjacent-voxel topology, boundary counts, volume validation, and budget rejection.
-- The scan manifest now records tetrahedral element counts and min/max six-volume.
+- The scan manifest records tetrahedral element counts and min/max six-volume. `solverIntegrated` remains false in the manifest because a generated mesh/runtime session is not equivalent to a validated Jolt↔XPBD coupled simulation.
 
 Quality boundary: this is a structured voxel tetrahedralization, **not** constrained-Delaunay or quality-optimized tetrahedral meshing. The surface is still voxel-derived and can be blocky; it is not a TSDF/Poisson reconstruction. The generated tetrahedra are validated for finite non-zero rest volume and face incidence, but no arbitrary-shape aspect-ratio optimization, scan-to-ground-truth accuracy score, or device-derived quality acceptance has been established. Real captured scans and the target LG V60 remain required for those claims.
