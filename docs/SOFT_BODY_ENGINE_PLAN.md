@@ -36,6 +36,22 @@ No component is considered integrated merely because its source exists in this r
 
 Small demos and academic prototypes that implement only edge stretch/volume constraints are not substitutes for the maintained PositionBasedDynamics library's FEM tetra constraint and full upstream coverage. They may be useful as comparative references, not as the production engine.
 
+## Stage 2 implementation added
+
+- Added `packages/vrix_soft_body`, an Android Flutter plugin that builds `libvrix_soft_body.so` for arm64-v8a and exposes the solver through Dart FFI.
+- The native plugin fetches Eigen 3.4.0 and PositionBasedDynamics at exact commit `10a70bc146a97873dc3c8fef372f5217e010542e`; it compiles only upstream XPBD, FEM support and math implementation files, not the upstream desktop framework, demos or Python bindings.
+- The adapter constructs tetrahedral rest matrices, computes lumped vertex masses from density and rest volumes, integrates fixed timesteps, invokes the upstream XPBD FEM tetra constraint with inversion handling, and applies hand/touch point targets through the upstream XPBD distance constraint.
+- XPBD Lagrange multipliers persist across solver iterations within a substep and reset between substeps.
+- The plugin includes the upstream PositionBasedDynamics MIT notice. Eigen is fetched at its MPL-2.0 release tag; its upstream license remains in the fetched dependency source.
+- Added a native CTest regression executable covering finite-state stepping, tetrahedral volume drift and hard point-target convergence. CI runs this host-side test and checks that the shared library is packaged into debug/release APKs and the AAB.
+- The app now declares the plugin as a local path dependency. No UI, ARCore camera ownership or Jolt implementation was replaced.
+
+### Stage 2 limitations that remain explicit
+
+- Current native body creation assigns lumped masses from tetrahedral density; per-vertex pinned masses and heterogeneous material regions are not yet exposed in the Dart contract.
+- The current contact boundary does not yet exchange deformable contact impulses with Jolt. Jolt remains the rigid scene owner; deformable-vs-rigid coupling is a later integration stage.
+- The solver's native host regression must pass and Android NDK packaging must pass before this stage is considered build-verified. Physical performance and thermal behaviour remain unverified until tested on LG V60/LG Wing.
+
 ## Frozen VRIX adapter contracts
 
 Implemented in `lib/domain/soft_body_contract.dart`:
@@ -68,7 +84,7 @@ Implemented in `lib/domain/soft_body_contract.dart`:
 
 ## Current execution status
 
-- Stage 1 contract source added; CI must compile and run the new contract tests before it is marked verified.
-- Upstream XPBD candidate identified; it has not yet been vendored or built for Android.
-- Tetrahedralizer selection, MediaPipe/ARCore interaction bridge, GPU deformation and organic response remain pending.
-- Current PR #6 build/test workflow is independent of these new commits; its existing unit/widget tests passed, while Android debug/release/split APK/AAB build steps were still running at the last check.
+- Stage 1 contracts and the first native XPBD/FEM adapter are now implemented in the feature branch; CI evidence is pending.
+- The upstream source is pinned and fetched reproducibly rather than copied into the app source tree; the exact MIT notice is retained.
+- Tetrahedralizer selection, MediaPipe/ARCore interaction bridge, GPU deformation, Jolt deformable-contact coupling and organic response remain pending.
+- Do not mark native integration as production-ready until native CTest, Flutter tests, Android NDK packaging and device benchmarks all pass.
