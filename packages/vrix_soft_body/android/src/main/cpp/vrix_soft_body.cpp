@@ -23,6 +23,7 @@ using PBD::Vector3r;
 struct Tetrahedron {
   std::array<uint32_t, 4> indices{};
   Real rest_volume = 0;
+  Real lambda = 0;
   Matrix3r inverse_rest_matrix = Matrix3r::Identity();
 };
 
@@ -81,6 +82,8 @@ void solve_substep(Body& body) {
     body.positions[i] += body.velocities[i] * dt;
   }
 
+  for (Tetrahedron& tetra : body.tetrahedra) tetra.lambda = 0;
+
   for (int iteration = 0; iteration < body.iterations; ++iteration) {
     for (Tetrahedron& tetra : body.tetrahedra) {
       const auto a = tetra.indices[0];
@@ -88,14 +91,13 @@ void solve_substep(Body& body) {
       const auto c = tetra.indices[2];
       const auto d = tetra.indices[3];
       Vector3r correction_a, correction_b, correction_c, correction_d;
-      Real multiplier = 0;
       PBD::XPBD::solve_FEMTetraConstraint(
           body.positions[a], body.inverse_masses[a],
           body.positions[b], body.inverse_masses[b],
           body.positions[c], body.inverse_masses[c],
           body.positions[d], body.inverse_masses[d],
           tetra.rest_volume, tetra.inverse_rest_matrix,
-          body.youngs_modulus, body.poisson_ratio, true, dt, multiplier,
+          body.youngs_modulus, body.poisson_ratio, true, dt, tetra.lambda,
           correction_a, correction_b, correction_c, correction_d);
       body.positions[a] += correction_a;
       body.positions[b] += correction_b;
