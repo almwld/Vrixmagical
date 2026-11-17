@@ -72,6 +72,25 @@ class VoxelTetrahedralizer {
       }
     }
     if (occupied.isEmpty) throw StateError('No finite occupied voxels were supplied.');
+    var minCellX = occupied.first.$1;
+    var minCellY = occupied.first.$2;
+    var minCellZ = occupied.first.$3;
+    var maxCellX = minCellX;
+    var maxCellY = minCellY;
+    var maxCellZ = minCellZ;
+    for (final cell in occupied) {
+      if (cell.$1 < minCellX) minCellX = cell.$1;
+      if (cell.$2 < minCellY) minCellY = cell.$2;
+      if (cell.$3 < minCellZ) minCellZ = cell.$3;
+      if (cell.$1 > maxCellX) maxCellX = cell.$1;
+      if (cell.$2 > maxCellY) maxCellY = cell.$2;
+      if (cell.$3 > maxCellZ) maxCellZ = cell.$3;
+    }
+    // The solver contract requires object-local metres. Center the occupied
+    // voxel bounds to avoid feeding large ARCore world coordinates to XPBD.
+    final originX = (minCellX + maxCellX + 1) * 0.5;
+    final originY = (minCellY + maxCellY + 1) * 0.5;
+    final originZ = (minCellZ + maxCellZ + 1) * 0.5;
     if (occupied.length * 6 > maximumTetrahedra) {
       throw StateError('Tetrahedralization exceeds the XPBD element budget.');
     }
@@ -81,9 +100,9 @@ class VoxelTetrahedralizer {
     int vertex(int x, int y, int z) => vertexIds.putIfAbsent((x, y, z), () {
       final id = vertices.length ~/ 3;
       vertices.addAll([
-        x * voxelSizeMeters,
-        y * voxelSizeMeters,
-        z * voxelSizeMeters,
+        (x - originX) * voxelSizeMeters,
+        (y - originY) * voxelSizeMeters,
+        (z - originZ) * voxelSizeMeters,
       ]);
       return id;
     });
