@@ -49,7 +49,6 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   bool _completed = false;
   PhysicsSceneService? _physicsScene;
   VrixSoftBodyFfiEngine? _softBodyEngine;
-  SoftBodyHandle? _softBodyHandle;
   Timer? _softBodyTicker;
   int _softBodySteps = 0;
   ObjectScanReconstructionResult? _reconstruction;
@@ -404,7 +403,6 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       _softBodyTicker?.cancel();
       _softBodyEngine?.dispose();
       _softBodyEngine = softBodyEngine;
-      _softBodyHandle = softBodyHandle;
       _softBodySteps = 0;
       final activeSoftBodyEngine = softBodyEngine;
       final activeSoftBodyHandle = softBodyHandle;
