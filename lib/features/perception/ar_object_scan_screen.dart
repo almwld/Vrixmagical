@@ -16,6 +16,8 @@ import 'package:path_provider/path_provider.dart';
 import '../../app/app_theme.dart';
 import '../../domain/captured_frame.dart';
 import '../../services/object_scan_store.dart';
+import '../../services/object_scan_reconstruction_service.dart';
+import '../../services/physics_scene_service.dart';
 
 /// Captures RGB, calibrated ARCore world pose and a user-refined mask from
 /// the same AR session. ARCore remains the sole camera/session owner.
@@ -44,6 +46,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   bool _busy = false;
   bool _saved = false;
   bool _completed = false;
+  PhysicsSceneService? _physicsScene;
+  ObjectScanReconstructionResult? _reconstruction;
   String _status = 'حرّك الهاتف ببطء حتى يستقر تتبع ARCore، ثم التقط المنظور الأول.';
   String? _error;
 
@@ -351,6 +355,39 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     }
   }
 
+  Future<void> _reconstructScan() async {
+    final store = _store;
+    if (_busy || !_completed || store == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _status = 'جارٍ دمج بيانات RGB-D وإعادة بناء السطح وتصدير GLB…';
+    });
+    try {
+      final result = await const ObjectScanReconstructionService().reconstruct(store.snapshot);
+      final physics = PhysicsSceneService();
+      try {
+        result.mesh.bakeStaticCollider(physics, id: 'scan-${store.id}');
+      } catch (_) {
+        physics.dispose();
+        rethrow;
+      }
+      _physicsScene?.dispose();
+      _physicsScene = physics;
+      if (mounted) setState(() {
+        _reconstruction = result;
+        _status = 'تم إنشاء GLB ومعاينة Collider ثابتة عبر Jolt. المثلثات: ${result.mesh.triangleCount} · النقاط: ${result.inputPointCount}. يلزم فحص جودة السطح على الجهاز قبل اعتماده.';
+      });
+    } catch (error) {
+      if (mounted) setState(() {
+        _error = error.toString();
+        _status = 'تعذرت إعادة البناء. لم يتم اعتماد مجسم أو Collider غير صالح.';
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _clearCurrentView() async {
     if (_busy) return;
     _maskImage?.dispose();
@@ -472,6 +509,16 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       ],
                     ),
                   ],
+                  if (_completed && _reconstruction == null)
+                    FilledButton.icon(
+                      onPressed: _busy ? null : _reconstructScan,
+                      icon: const Icon(Icons.view_in_ar_rounded),
+                      label: const Text('إعادة بناء Mesh وتصدير GLB وCollider'),
+                    ),
+                  if (_reconstruction != null)
+                    Text('ملف GLB: ${_reconstruction!.glbFile.path}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppColors.success, fontSize: 10)),
                   if (_photoPath == null && (_store?.viewCount ?? 0) > 0)
                     Text('المناظير المحفوظة: ${_store!.viewCount}',
                         textAlign: TextAlign.center,
