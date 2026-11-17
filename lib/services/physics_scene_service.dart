@@ -787,6 +787,32 @@ class PhysicsSceneService {
     });
   }
 
+  /// Applies an impulse at a world-space point, including its angular effect.
+  /// The point and impulse are expressed in world coordinates (kg·m/s).
+  void applyImpulseAtPoint(String id, Vector3 impulse, Vector3 worldPoint) {
+    _ensureAvailable();
+    if (!_isFiniteVector(impulse) || !_isFiniteVector(worldPoint)) {
+      throw ArgumentError('Impulse and world point must be finite.');
+    }
+    final record = _bodies[id];
+    if (record == null) return;
+    if (record.motionType != jolt.JJ_MOTION_DYNAMIC) {
+      throw StateError('Point impulses can only be applied to dynamic bodies.');
+    }
+    using((arena) {
+      final value = arena<jolt.JPH_Vec3>();
+      final point = arena<jolt.JPH_Vec3>();
+      _writeJoltVector(value, impulse);
+      _writeJoltVector(point, worldPoint);
+      jolt.JPH_BodyInterface_AddImpulse2(
+        _getBodyInterface(),
+        record.handle,
+        value,
+        point,
+      );
+    });
+  }
+
   void addForce(String id, Vector3 force) {
     _ensureAvailable();
     if (!_isFiniteVector(force)) {
