@@ -116,7 +116,7 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
   void setPointTarget({
     required SoftBodyHandle body,
     required int vertexIndex,
-    required List<double> targetWorldPosition,
+    required List<double> targetObjectPosition,
     double compliance = 0,
   }) {
     _ensureActive();
@@ -124,15 +124,15 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
     if (vertexIndex < 0 || vertexIndex >= count) {
       throw RangeError.value(vertexIndex, 'vertexIndex');
     }
-    if (targetWorldPosition.length != 3 ||
-        targetWorldPosition.any((value) => !value.isFinite) ||
+    if (targetObjectPosition.length != 3 ||
+        targetObjectPosition.any((value) => !value.isFinite) ||
         !compliance.isFinite || compliance < 0) {
       throw ArgumentError('Target must be finite XYZ with non-negative compliance.');
     }
     final target = calloc<Float>(3);
     try {
       for (var i = 0; i < 3; i++) {
-        target[i] = targetWorldPosition[i];
+        target[i] = targetObjectPosition[i];
       }
       if (_setTarget(Pointer<Void>.fromAddress(body.value), vertexIndex, target, compliance) == 0) {
         throw StateError('Native XPBD rejected the point target.');
