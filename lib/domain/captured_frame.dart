@@ -60,6 +60,8 @@ class DepthFrame {
     required this.imageTimestampNs,
     required this.intrinsics,
     this.isReprojected = false,
+    this.isRaw = false,
+    this.confidenceAvailable = true,
   });
 
   final Float32List valuesMeters;
@@ -72,6 +74,9 @@ class DepthFrame {
   /// Raw Android Image timestamp; raw depth may retain this across reprojected frames.
   final int imageTimestampNs;
   final bool isReprojected;
+  final bool isRaw;
+  /// False when AUTOMATIC depth supplied no per-pixel confidence plane.
+  final bool confidenceAvailable;
   final CameraIntrinsics intrinsics;
 
   void validate() {
