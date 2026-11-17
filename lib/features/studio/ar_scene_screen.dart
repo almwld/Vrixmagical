@@ -16,6 +16,7 @@ import 'package:vector_math/vector_math_64.dart' show Matrix4, Quaternion, Vecto
 import '../../app/app_theme.dart';
 import '../../domain/vrix_object.dart';
 import '../../services/physics_scene_service.dart';
+import '../../services/lg_wing_deck_service.dart';
 
 class _PlacedAsset {
   const _PlacedAsset({
@@ -56,6 +57,10 @@ class _ArSceneScreenState extends State<ArSceneScreen>
   String _status = 'بانتظار تهيئة الواقع المعزز…';
   bool _busy = false;
   bool _physicsFaultReported = false;
+  bool _physicsEnabled = true;
+  double _touchThreshold = 0.18;
+  int _telemetryFrames = 0;
+  DateTime _telemetryWindow = DateTime.now();
 
   static const _sampleModel =
       'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb';
@@ -85,6 +90,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     _session = session;
     _objects = objects;
     _anchors = anchors;
+    unawaited(LgWingDeckService.instance.show(onAction: _onWingDeckAction));
     session.onPlaneOrPointTap = _onSurfaceTap;
     session.onPlaneDetected = (count) {
       if (mounted) setState(() => _status = 'تم اكتشاف $count سطحاً');
@@ -152,12 +158,24 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     _lastPhysicsFrame = now;
     if (previous == null) return;
 
+    _telemetryFrames++;
+    final elapsed = now.difference(_telemetryWindow);
+    if (elapsed >= const Duration(seconds: 1)) {
+      final fps = _telemetryFrames / elapsed.inMicroseconds * Duration.microsecondsPerSecond;
+      _telemetryFrames = 0;
+      _telemetryWindow = now;
+      unawaited(_sendWingTelemetry(fps));
+    }
+
     try {
-      physics.advance(
-        now.difference(previous).inMicroseconds / Duration.microsecondsPerSecond,
-      );
-      // Drain native events every physics frame so native buffers cannot grow.
+      if (_physicsEnabled) {
+        physics.advance(
+          now.difference(previous).inMicroseconds / Duration.microsecondsPerSecond,
+        );
+      }
+      // Drain native events every frame so native buffers cannot grow.
       physics.drainEvents();
+      if (!_physicsEnabled) return;
       // ARNode writes cross a platform channel; cap renderer sync to 30 Hz.
       final lastSync = _lastArSync;
       if (lastSync != null &&
@@ -194,6 +212,41 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     }
   }
 
+  void _onWingDeckAction(String action, Map<String, Object?> data) {
+    switch (action) {
+      case 'togglePhysics':
+        setState(() {
+          _physicsEnabled = !_physicsEnabled;
+          _status = _physicsEnabled ? 'تم تشغيل محاكاة Jolt.' : 'تم إيقاف محاكاة Jolt مؤقتاً.';
+        });
+        _physics?.resetAccumulator();
+        unawaited(_sendWingTelemetry(0));
+        break;
+      case 'touchThreshold':
+        final value = data['value'];
+        if (value is num) _touchThreshold = value.toDouble().clamp(0.0, 1.0);
+        break;
+      case 'handTrackingInfo':
+        setState(() { _status = 'MediaPipe يعمل حالياً في وحدة مرآة اليد؛ لم يُدمج بعد داخل جلسة AR لتجنب تعارض الكاميرا.'; });
+        break;
+      case 'scanInfo':
+        setState(() { _status = 'بيانات RGB-D تحفظ من وحدة مسح الأجسام. دمج Voxel Fusion وإعادة بناء GLB لم يكتمل بعد.'; });
+        break;
+      case 'hideDeck':
+        unawaited(LgWingDeckService.instance.hide());
+        break;
+    }
+  }
+
+  Future<void> _sendWingTelemetry(double fps) {
+    return LgWingDeckService.instance.updateTelemetry(
+      fps: fps,
+      placedObjects: _placed.length,
+      physicsEnabled: _physicsEnabled,
+      physicsLabel: _physics?.engineLabel ?? 'Jolt غير متاح',
+      touchThreshold: _touchThreshold,
+    );
+  }
   bool _matricesDiffer(Matrix4 current, Matrix4 next) {
     for (var i = 0; i < 16; i++) {
       if ((current.storage[i] - next.storage[i]).abs() > 1e-4) {
@@ -368,6 +421,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(LgWingDeckService.instance.hide());
     _stopPhysicsTicker();
     _physics?.dispose();
     _session?.dispose();
