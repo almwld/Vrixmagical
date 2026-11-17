@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
       - name: Native XPBD solver regression
         run: |
           cmake -S packages/vrix_soft_body/android/src/main/cpp -B /tmp/vrix-soft-body-native \
@@ -53,10 +54,10 @@ jobs:
         run: dart run mediapipe_core:bundle_models
 
       - name: Format source
-        run: dart format lib test
+        run: dart format lib test packages/vrix_soft_body/lib
 
       - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed lib test
+        run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib
 
       - name: Analyze
         run: flutter analyze --no-fatal-infos
@@ -75,83 +76,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Verify Jolt native library in debug APK
+      - name: Verify native libraries in debug APK
         run: |
           unzip -Z1 build/app/outputs/flutter-apk/app-debug.apk | tee /tmp/debug-apk-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so
-
-      - name: Android release APK
-        run: flutter build apk --release
-
-      - name: Verify Jolt native library in release APK
-        run: |
-          unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so
-
-      - name: Android split release APKs
-        run: flutter build apk --release --split-per-abi
-
-      - name: Verify split APK outputs
-        run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          test -s build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-
-      - name: Android release App Bundle
-        run: flutter build appbundle --release
-
-      - name: Verify Jolt native library in release bundle
-        run: |
-          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
-          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/debug-apk-files.txt
+          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/debug-apk-files.txt
           grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/debug-apk-files.txt
 
       - name: Android release APK
         run: flutter build apk --release
 
-      - name: Verify Jolt native library in release APK
+      - name: Verify native libraries in release APK
         run: |
           unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
           grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-apk-files.txt
-
-      - name: Android split release APKs
-        run: flutter build apk --release --split-per-abi
-
-      - name: Verify split APK outputs
-        run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          test -s build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-
-      - name: Android release App Bundle
-        run: flutter build appbundle --release
-
-      - name: Verify Jolt native library in release bundle
-        run: |
-          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
-          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/release-apk-files.txt
           grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-apk-files.txt
 
       - name: Android split release APKs
@@ -165,163 +102,11 @@ jobs:
       - name: Android release App Bundle
         run: flutter build appbundle --release
 
-      - name: Verify Jolt native library in release bundle
+      - name: Verify native libraries in release bundle
         run: |
           unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
           grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/debug-apk-files.txt
-          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/debug-apk-files.txt
-
-      - name: Android release APK
-        run: flutter build apk --release
-
-      - name: Verify Jolt native library in release APK
-        run: |
-          unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-apk-files.txt
-
-      - name: Android split release APKs
-        run: flutter build apk --release --split-per-abi
-
-      - name: Verify split APK outputs
-        run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          test -s build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-
-      - name: Android release App Bundle
-        run: flutter build appbundle --release
-
-      - name: Verify Jolt native library in release bundle
-        run: |
-          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
-          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/release-aab-files.txt
           grep -F 'base/lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-aab-files.txt
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/debug-apk-files.txt
-          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/debug-apk-files.txt
-
-      - name: Android release APK
-        run: flutter build apk --release
-
-      - name: Verify Jolt native library in release APK
-        run: |
-          unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-apk-files.txt
-
-      - name: Android split release APKs
-        run: flutter build apk --release --split-per-abi
-
-      - name: Verify split APK outputs
-        run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          test -s build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-
-      - name: Android release App Bundle
-        run: flutter build appbundle --release
-
-      - name: Verify Jolt native library in release bundle
-        run: |
-          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
-          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/release-apk-files.txt
-          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-apk-files.txt
-
-      - name: Android split release APKs
-        run: flutter build apk --release --split-per-abi
-
-      - name: Verify split APK outputs
-        run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          test -s build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-
-      - name: Android release App Bundle
-        run: flutter build appbundle --release
-
-      - name: Verify Jolt native library in release bundle
-        run: |
-          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
-          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
-          retention-days: 14
- /tmp/debug-apk-files.txt
-          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/debug-apk-files.txt
-
-      - name: Android release APK
-        run: flutter build apk --release
-
-      - name: Verify Jolt native library in release APK
-        run: |
-          unzip -Z1 build/app/outputs/flutter-apk/app-release.apk | tee /tmp/release-apk-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-apk-files.txt
-
-      - name: Android split release APKs
-        run: flutter build apk --release --split-per-abi
-
-      - name: Verify split APK outputs
-        run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          test -s build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-
-      - name: Android release App Bundle
-        run: flutter build appbundle --release
-
-      - name: Verify Jolt native library in release bundle
-        run: |
-          unzip -Z1 build/app/outputs/bundle/release/app-release.aab | tee /tmp/release-aab-files.txt
-          grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
