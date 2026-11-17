@@ -26,11 +26,11 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
     if (_importing) return;
     setState(() => _importing = true);
     try {
-      final selection = await FilePicker.platform.pickFiles(
+      final selection = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: const ['glb', 'gltf'],
       );
-      final path = selection?.files.single.path;
+      final path = selection?.path;
       if (path == null) return;
       final store = await _storeFuture;
       final imported = await store.importModel(path);
