@@ -10,6 +10,8 @@ include(FetchContent)
 if(POLICY CMP0169)
   cmake_policy(SET CMP0169 OLD)
 endif()
+# Android cross-compilation must not build or execute Eigen documentation examples.
+set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
