@@ -29,9 +29,9 @@ typedef _NameDart = Pointer<Char> Function();
 /// Dart FFI adapter for the pinned PositionBasedDynamics XPBD/FEM implementation.
 /// Android arm64 is the supported runtime target; no Dart fallback solver exists.
 class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
-  VrixSoftBodyFfiEngine._(this._library)
-      : _create = _library.lookupFunction<_CreateNative, _CreateDart>('vrix_soft_body_create'),
-        _step = _library.lookupFunction<_StepNative, _StepDart>('vrix_soft_body_step'),
+  VrixSoftBodyFfiEngine._(DynamicLibrary library)
+      : _create = library.lookupFunction<_CreateNative, _CreateDart>('vrix_soft_body_create'),
+        _step = library.lookupFunction<_StepNative, _StepDart>('vrix_soft_body_step'),
         _setTarget = _library.lookupFunction<_TargetNative, _TargetDart>('vrix_soft_body_set_point_target'),
         _clearTarget = _library.lookupFunction<_ClearTargetNative, _ClearTargetDart>('vrix_soft_body_clear_point_target'),
         _readState = _library.lookupFunction<_ReadNative, _ReadDart>('vrix_soft_body_read_state'),
@@ -50,7 +50,6 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
     throw UnsupportedError('VRIX XPBD native backend currently supports Android arm64 only.');
   }
 
-  final DynamicLibrary _library;
   final _CreateDart _create;
   final _StepDart _step;
   final _TargetDart _setTarget;
