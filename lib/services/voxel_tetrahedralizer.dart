@@ -144,10 +144,10 @@ class VoxelTetrahedralizer {
 
     for (var i = 0; i < tetrahedra.length; i += 4) {
       final a = tetrahedra[i], b = tetrahedra[i + 1], c = tetrahedra[i + 2], d = tetrahedra[i + 3];
-      addFace(a, b, c);
-      addFace(a, d, b);
-      addFace(a, c, d);
-      addFace(b, d, c);
+      addFace(a, b, c, d);
+      addFace(a, d, b, c);
+      addFace(a, c, d, b);
+      addFace(b, d, c, a);
     }
     final surface = <int>[];
     for (final face in faceUses.values) {
