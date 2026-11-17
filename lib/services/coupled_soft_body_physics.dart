@@ -89,7 +89,6 @@ class CoupledSoftBodyPhysics {
     final rigidSteps = scene.advance(deltaSeconds);
     _consumeJoltContacts();
     engine.step(deltaSeconds);
-    final after = engine.readState(softBody);
     _applyXpbdReactions(deltaSeconds);
     _coupledSteps++;
     return rigidSteps;
