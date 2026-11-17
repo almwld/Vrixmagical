@@ -11,6 +11,8 @@ dependencies:
   camera: ^0.12.2
   flutter_reality:
     path: packages/flutter_reality_vrix
+  vrix_soft_body:
+    path: packages/vrix_soft_body
   just_jolt: ^0.2.0
   ffi: ^2.1.4
   material_ui: ^1.11.0
