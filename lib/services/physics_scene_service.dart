@@ -236,6 +236,50 @@ class PhysicsSceneService {
     );
   }
 
+  /// Adds a kinematic convex proxy used by deformable bodies for Jolt
+  /// broadphase/narrowphase contacts. XPBD remains the source of deformation.
+  void addKinematicConvexHull({
+    required String id,
+    required Matrix4 worldTransform,
+    required List<Vector3> vertices,
+    double maxConvexRadius = 0.02,
+    double friction = 0.6,
+  }) {
+    if (vertices.length < 4 || vertices.length > 4096) {
+      throw ArgumentError.value(vertices.length, 'vertices.length');
+    }
+    _validatePositive(maxConvexRadius, 'maxConvexRadius');
+    if (vertices.any((vertex) => !_isFiniteVector(vertex))) {
+      throw ArgumentError('Convex hull vertices must be finite.');
+    }
+    final flattened = <double>[
+      for (final vertex in vertices) ...<double>[vertex.x, vertex.y, vertex.z],
+    ];
+    _addBody(
+      id: id,
+      shape: _ShapeSpec(
+        _ShapeKind.convexHull,
+        flattened,
+        convexRadius: maxConvexRadius,
+      ),
+      motionType: jolt.JJ_MOTION_KINEMATIC,
+      worldTransform: worldTransform,
+      friction: friction,
+      restitution: 0,
+      gravityFactor: 0,
+      mass: 0,
+      layer: 1,
+      sensor: false,
+      continuous: true,
+    );
+  }
+
+  /// True only for dynamic bodies that can receive XPBD reaction impulses.
+  bool isDynamicBody(String id) {
+    _ensureAvailable();
+    return _bodies[id]?.motionType == jolt.JJ_MOTION_DYNAMIC;
+  }
+
   void addDynamicBox({
     required String id,
     required Matrix4 worldTransform,
