@@ -118,18 +118,15 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     );
     objects.onInitialize();
 
-    try {
-      _physics = PhysicsSceneService();
-      _startPhysicsTicker();
-      if (mounted) {
-        setState(() {
-          _status = 'AR جاهز · محرك الفيزياء: ${_physics!.engineLabel}';
-        });
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() => _status = 'AR جاهز · الفيزياء غير متاحة: $error');
-      }
+    // Keep AR camera/session startup independent from the native Jolt runtime.
+    // Jolt loads a platform FFI library and allocates a native world; doing that
+    // while the PlatformView is being created can terminate the whole process on
+    // devices where native loading/initialization is incompatible. Initialize it
+    // only after the user explicitly places the first object.
+    if (mounted) {
+      setState(() {
+        _status = 'كاميرا الواقع المعزز جاهزة · الفيزياء ستُهيّأ عند تثبيت أول مجسم.';
+      });
     }
   }
 
@@ -330,7 +327,21 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         metadata: const {'assetKind': 'sample', 'format': 'glb'},
       );
 
-      final physics = _physics;
+      var physics = _physics;
+      if (physics == null) {
+        try {
+          physics = PhysicsSceneService();
+          _physics = physics;
+          _startPhysicsTicker();
+        } catch (error) {
+          // A native physics failure must not roll back an otherwise successful
+          // AR placement or take down the camera session.
+          physics = null;
+          if (mounted) {
+            setState(() => _status = 'تم تثبيت المجسم · تعذرت تهيئة Jolt: $error');
+          }
+        }
+      }
       if (physics != null && !physics.isDisposed) {
         floorBodyId = 'floor_${node.name}';
         dynamicBodyId = 'body_${node.name}';
