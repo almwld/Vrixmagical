@@ -67,7 +67,7 @@ class CoupledSoftBodyPhysics {
   final double maxContactDistance;
   final Matrix4 _initialTransform;
   late final Vector3 _initialCentroid;
-  final Map<String, _ActiveContact> _contacts = <String, _ActiveContact>{};
+  final Map<int, _ActiveContact> _contacts = <int, _ActiveContact>{};
   bool _disposed = false;
   int _coupledSteps = 0;
 
@@ -98,33 +98,55 @@ class CoupledSoftBodyPhysics {
     final centre = _centroid(positions);
     final displacement = centre - _initialCentroid;
     final target = Matrix4.copy(_initialTransform);
+    // XPBD positions are object-local. Rotate the local centroid displacement
+    // into world space before moving the Jolt proxy; adding it directly would
+    // drift whenever the scanned object is initially rotated.
     final origin = target.getTranslation();
-    target.setTranslation(origin + displacement);
+    final worldDisplacement =
+        _initialTransform.transform3(displacement) -
+        _initialTransform.transform3(Vector3.zero());
+    target.setTranslation(origin + worldDisplacement);
     scene.moveKinematic(proxyBodyId, target, deltaSeconds: dt);
   }
 
   void _consumeJoltContacts(double deltaSeconds) {
     final events = scene.drainEvents();
-    // A contact-end event arrives after Jolt's step, while XPBD still holds
-    // the reaction accumulated during the previous soft-body step. Flush it
-    // before clearing the vertex constraint or its rigid-body reaction is lost.
-    final hasProxyContactEnd = events.any(
+    // Flush XPBD reactions before a contact-end event clears its constraint.
+    if (events.any(
       (event) =>
           event.isContactEnd &&
           (event.bodyA == proxyBodyId || event.bodyB == proxyBodyId),
-    );
-    if (hasProxyContactEnd) _applyXpbdReactions(deltaSeconds);
+    )) {
+      _applyXpbdReactions(deltaSeconds);
+    }
 
     for (final event in events) {
       if (event.bodyA != proxyBodyId && event.bodyB != proxyBodyId) continue;
       final otherBody = event.bodyA == proxyBodyId ? event.bodyB : event.bodyA;
       if (otherBody == null || otherBody == proxyBodyId) continue;
-      final key = _contactKey(otherBody, event.point);
+
+      final transform = scene.bodyWorldTransform(proxyBodyId);
+      final inverse = Matrix4.inverted(transform);
+      final localPoint = inverse.transform3(Vector3.copy(event.point));
 
       if (event.isContactEnd) {
-        final previous = _contacts.remove(key);
-        if (previous != null) {
-          engine.clearContact(body: softBody, vertexIndex: previous.vertexIndex);
+        // End points can move slightly between frames. Match the closest
+        // active point on the same rigid body rather than using bodyId alone:
+        // a rigid body may contact several different soft-body vertices.
+        var matchedVertex = -1;
+        var bestDistanceSquared = maxContactDistance * maxContactDistance * 4;
+        for (final entry in _contacts.entries) {
+          if (entry.value.otherBodyId != otherBody) continue;
+          final distanceSquared =
+              (entry.value.worldPoint - event.point).length2;
+          if (distanceSquared < bestDistanceSquared) {
+            bestDistanceSquared = distanceSquared;
+            matchedVertex = entry.key;
+          }
+        }
+        if (matchedVertex >= 0) {
+          _contacts.remove(matchedVertex);
+          engine.clearContact(body: softBody, vertexIndex: matchedVertex);
         }
         continue;
       }
@@ -135,9 +157,6 @@ class CoupledSoftBodyPhysics {
       // the rigid surface toward the deformable free space.
       final worldNormal = Vector3.copy(event.normal);
       if (proxyIsA) worldNormal.negate();
-      final transform = scene.bodyWorldTransform(proxyBodyId);
-      final inverse = Matrix4.inverted(transform);
-      final localPoint = inverse.transform3(Vector3.copy(event.point));
       final localNormalTip = inverse.transform3(
         Vector3.copy(event.point)..add(worldNormal),
       );
@@ -147,11 +166,11 @@ class CoupledSoftBodyPhysics {
 
       final state = engine.readState(softBody);
       final nearest = _nearestVertex(state.positions, localPoint);
-      if (nearest.distance > maxContactDistance) continue;
-      final previous = _contacts[key];
-      if (previous != null && previous.vertexIndex != nearest.index) {
-        engine.clearContact(body: softBody, vertexIndex: previous.vertexIndex);
-      }
+      if (nearest.index < 0 || nearest.distance > maxContactDistance) continue;
+
+      // Native XPBD stores one contact constraint per vertex. Keep the Dart
+      // manifold keyed by that same vertex so multiple contact points on one
+      // rigid body do not overwrite one another or double-apply one reaction.
       engine.setContact(
         body: softBody,
         vertexIndex: nearest.index,
@@ -160,7 +179,7 @@ class CoupledSoftBodyPhysics {
         friction: contactFriction,
         compliance: contactCompliance,
       );
-      _contacts[key] = _ActiveContact(
+      _contacts[nearest.index] = _ActiveContact(
         otherBodyId: otherBody,
         vertexIndex: nearest.index,
         worldPoint: Vector3.copy(event.point),
@@ -236,8 +255,6 @@ class CoupledSoftBodyPhysics {
     }
     return result / mesh.vertexCount.toDouble();
   }
-
-  String _contactKey(String bodyId, Vector3 point) => bodyId;
 
   void _ensureActive() {
     if (_disposed) throw StateError('Coupled soft-body physics has been disposed.');
