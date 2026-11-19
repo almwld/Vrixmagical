@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 gradle = Path("android/app/build.gradle.kts")
 if not gradle.exists():
@@ -35,7 +36,7 @@ if manifest.exists():
             1,
         )
     # Bind the generated SVG-derived assets to the Android application.
-    application = re.search(r"<application\\b[^>]*>", xml, flags=re.DOTALL)
+    application = re.search(r"<application\b[^>]*>", xml, flags=re.DOTALL)
     if application is None:
         raise SystemExit("AndroidManifest.xml has no <application> element")
     tag = application.group(0)
