@@ -35,6 +35,9 @@ jobs:
       - name: Bootstrap and configure Android host
         run: bash tool/bootstrap_android.sh
 
+      - name: Verify SVG-derived Android launcher icons
+        run: python3 tool/generate_launcher_icons.py --verify
+
       - name: Install dependencies
         run: flutter pub get
 
