@@ -20,7 +20,22 @@ class SoftBodyRenderFrame {
         velocities = List<double>.unmodifiable(velocities),
         surfaceTriangleIndices =
             List<int>.unmodifiable(surfaceTriangleIndices),
-        worldTransform = Matrix4.copy(worldTransform);
+        worldTransform = Matrix4.copy(worldTransform) {
+    if (frameNumber < 0 ||
+        positions.isEmpty ||
+        positions.length % 3 != 0 ||
+        velocities.length != positions.length ||
+        positions.any((value) => !value.isFinite) ||
+        velocities.any((value) => !value.isFinite) ||
+        surfaceTriangleIndices.isEmpty ||
+        surfaceTriangleIndices.length % 3 != 0 ||
+        surfaceTriangleIndices.any(
+          (index) => index < 0 || index >= positions.length ~/ 3,
+        ) ||
+        worldTransform.storage.any((value) => !value.isFinite)) {
+      throw const FormatException('Invalid deformable render-frame buffers.');
+    }
+  }
 
   final int frameNumber;
   final List<double> positions;
