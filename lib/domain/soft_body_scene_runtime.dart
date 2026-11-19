@@ -12,10 +12,10 @@ import '../services/physics_scene_service.dart';
 class SoftBodyRenderFrame {
   SoftBodyRenderFrame({
     required this.frameNumber,
-    required this.positions,
-    required this.velocities,
-    required this.surfaceTriangleIndices,
-    required this.worldTransform,
+    required List<double> positions,
+    required List<double> velocities,
+    required List<int> surfaceTriangleIndices,
+    required Matrix4 worldTransform,
   })  : positions = List<double>.unmodifiable(positions),
         velocities = List<double>.unmodifiable(velocities),
         surfaceTriangleIndices =
