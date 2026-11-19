@@ -34,6 +34,20 @@ if manifest.exists():
             '    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-feature android:name="android.hardware.camera.ar" android:required="false" tools:replace="android:required" />\n    <application',
             1,
         )
+    # Bind the generated SVG-derived assets to the Android application.
+    application = re.search(r"<application\\b[^>]*>", xml, flags=re.DOTALL)
+    if application is None:
+        raise SystemExit("AndroidManifest.xml has no <application> element")
+    tag = application.group(0)
+    if re.search(r'android:icon="[^"]+"', tag):
+        tag = re.sub(r'android:icon="[^"]+"', 'android:icon="@mipmap/ic_launcher"', tag)
+    else:
+        tag = tag[:-1] + ' android:icon="@mipmap/ic_launcher">'
+    if re.search(r'android:roundIcon="[^"]+"', tag):
+        tag = re.sub(r'android:roundIcon="[^"]+"', 'android:roundIcon="@mipmap/ic_launcher_round"', tag)
+    else:
+        tag = tag[:-1] + ' android:roundIcon="@mipmap/ic_launcher_round">'
+    xml = xml[:application.start()] + tag + xml[application.end():]
     manifest.write_text(xml)
 
 main_activity = Path("android/app/src/main/kotlin/com/virxmagical/virxmagical/MainActivity.kt")
