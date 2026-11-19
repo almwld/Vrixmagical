@@ -32,6 +32,10 @@ jobs:
           channel: stable
           cache: true
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Bootstrap and configure Android host
         run: bash tool/bootstrap_android.sh
 
