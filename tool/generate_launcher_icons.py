@@ -82,6 +82,12 @@ def verify() -> None:
                 raise SystemExit(f"Incorrect launcher icon dimensions: {path}")
     if png_size(RES / "drawable-nodpi/ic_launcher_foreground.png") != (432, 432):
         raise SystemExit("Adaptive foreground must be 432x432")
+    manifest = ROOT / "android/app/src/main/AndroidManifest.xml"
+    manifest_text = manifest.read_text(encoding="utf-8")
+    if 'android:icon="@mipmap/ic_launcher"' not in manifest_text:
+        raise SystemExit("Android manifest does not reference the generated launcher icon")
+    if 'android:roundIcon="@mipmap/ic_launcher_round"' not in manifest_text:
+        raise SystemExit("Android manifest does not reference the generated round launcher icon")
     for folder in ("mipmap-anydpi-v26", "mipmap-anydpi-v33"):
         for name in ("ic_launcher.xml", "ic_launcher_round.xml"):
             if not (RES / folder / name).is_file():
