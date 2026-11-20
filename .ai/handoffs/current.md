@@ -2,23 +2,28 @@
 
 **Date:** 2026-11-20  
 **Orchestrator / writer:** current task owner  
-**Branch:** update this field at the start of each task  
-**Status:** active multi-workstream closure
+**Canonical branch:** main  
+**Status:** active cross-layer closure
 
 ## Objective
-Close the Jolt↔XPBD integration, connect RGB-D scan output to the physics runtime, stabilize AR anchors/depth, expose SplatKit/Vulkan controls and unify delegation/memory/skills.
+Close Jolt↔XPBD coupling, connect scan output to physics, stabilize AR anchors/depth, complete SplatKit/Vulkan host controls and maintain one shared AI delegation/memory system.
 
-## Current order
-1. Finish PR #13 CI/review. Do not merge the coupling parent to main while impulse/contact integration gates remain open.
-2. Finish PR #14 CI for the latest head and review the Kotlin conversion/depth calibration.
-3. Reconcile scan runtime ownership with the persistent AR scene; keep the current isometric preview explicitly distinct from a live AR mesh.
-4. Add a typed, per-view SplatKit Dart↔Kotlin bridge for load/frame/GPU events, stats, camera, quality, collider and tiled-world operations.
-5. Add the shared AI delegation registry/playbooks/skills and run `python3 tool/validate_ai_handoff.py`.
+## Current exact-head work
+1. **PR #13** — head 1dda4712de05c186dcfb6155f3ca34d85ea86154; run #278. Native XPBD regression, analyzer and Flutter tests passed; Android debug build was active. Review the per-contact reaction mapper and pure-torque test, then finish release/split/AAB checks.
+2. **PR #14** — head a2c7c785780f8b18a0463d0ec9db1acc9e326c0c; run #286 started. Includes anchor quaternion, CPU RGB-D intrinsics scaling and race-safe pending cloud-anchor callbacks.
+3. **PR #16** — head bcf25022ce95fbe22384cfb22e09a17757103c96; run #275. Flutter analysis/tests passed; Android debug build and native library/16 KiB checks remained.
+4. **PR #15** — head 3fbd99fceccf4c2fb1eebb45df3f04c76e228309; run #271 passed full CI and artifact upload. Keep its memory snapshot reconciled with the latest active PR state.
 
-## Non-negotiable checks
-- Read the existing architecture before edits; smallest coherent changes; preserve public APIs.
-- Never report a build/test/device run unless the actual CI/device evidence exists.
-- No full multi-manifold or production-ready claim while the native contract is one contact per vertex.
-- No ARCore/Vulkan runtime claim from emulator or CI alone.
-- No secret/user image payload in logs or durable memory.
-- Update this file and PROJECT_STATE.md when a workstream changes state.
+## Next actions
+- Poll the exact CI runs above; fix failures on their own branches.
+- Do not merge PR #13 into main; it is based on the PR #7 coupling branch and still needs same-scene integration/device acceptance.
+- Do not claim live AR mesh rendering: the current scan screen uses a renderer-neutral isometric preview.
+- Do not claim Vulkan device readiness from CI; wait for a physical device run.
+- Update PROJECT_STATE.md and this handoff after every material state change.
+
+## Acceptance gates
+- Jolt/XPBD: actual force direction, per-contact torque, contact lifecycle and same-scene dynamic-body interaction.
+- Scan: persistent scene ownership and live AR mesh renderer.
+- AR: anchor lifecycle/relocalization and RGB-D alignment on LM-F100.
+- SplatKit: exact beta.3 bridge compile, native library packaging, 16 KiB alignment, first GPU frame, stats and lifecycle on a physical Vulkan device.
+- AI: one orchestrator, one writer per branch, bounded specialist delegation, validator passing, no secrets/raw reasoning in memory.
