@@ -399,7 +399,6 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         scene: physics,
         objectId: store.id,
         worldTransform: worldTransform,
-        config: const SoftBodySolverConfig(),
       );
       final initialFrame = candidateRuntime.advance(1 / 60);
       final objectManager = _objects;
