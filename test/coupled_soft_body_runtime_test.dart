@@ -71,8 +71,12 @@ void main() {
 
         physics.advance(1 / 60);
         final directOverlaps = physics.overlapBody('soft:runtime-test');
+        final directProbeHit = directOverlaps.firstWhere(
+          (hit) => hit.bodyId == 'runtime-probe',
+        );
+        expect(directProbeHit.normal.length2, greaterThan(1e-8));
         expect(
-          directOverlaps.any((hit) => hit.bodyId == 'runtime-probe'),
+          directProbeHit.point.storage.every((value) => value.isFinite),
           isTrue,
         );
 
