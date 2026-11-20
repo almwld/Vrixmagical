@@ -5,6 +5,7 @@ import 'package:vector_math/vector_math_64.dart';
 import 'package:vrix_soft_body/vrix_soft_body.dart';
 import 'physics_scene_service.dart';
 import '../domain/soft_body_contact_policy.dart';
+import '../domain/soft_body_reaction_mapper.dart';
 
 /// Couples one XPBD deformable mesh to Jolt through a kinematic convex proxy.
 ///
@@ -186,43 +187,32 @@ class CoupledSoftBodyPhysics {
       ..addAll(nextContacts);
   }
 
-  void _applyXpbdReactions(double dt) {
-    if (_contacts.isEmpty) {
-      // Drain the native accumulator even when no rigid body is currently in
-      // contact, preventing stale reactions from being applied on a later hit.
-      engine.readReactionForces(softBody);
-      return;
-    }
+  void _applyXpbdReactions(double deltaSeconds) {
     final reactions = engine.readReactionForces(softBody);
-    final transform = scene.bodyWorldTransform(proxyBodyId);
-    final grouped = <String, _ReactionAccumulator>{};
-    for (final contact in _contacts.values) {
-      if (!scene.isDynamicBody(contact.otherBodyId)) continue;
-      final offset = contact.vertexIndex * 3;
-      final localForce = Vector3(
-        reactions[offset],
-        reactions[offset + 1],
-        reactions[offset + 2],
+    if (_contacts.isEmpty || deltaSeconds <= 0) return;
+
+    final impulses = SoftBodyReactionMapper.map(
+      packedForces: reactions,
+      contacts: _contacts.values.map(
+        (contact) => SoftBodyReactionContact(
+          rigidBodyId: contact.otherBodyId,
+          vertexIndex: contact.vertexIndex,
+          worldPoint: contact.worldPoint,
+        ),
+      ),
+      worldTransform: scene.bodyWorldTransform(proxyBodyId),
+      deltaSeconds: deltaSeconds,
+      isDynamicBody: scene.isDynamicBody,
+    );
+
+    // Keep every contact's point of application. Aggregating by body can
+    // erase a pure torque couple when its linear impulses cancel.
+    for (final impulse in impulses) {
+      scene.applyImpulseAtPoint(
+        impulse.rigidBodyId,
+        impulse.impulse,
+        impulse.worldPoint,
       );
-      if (localForce.length2 <= 1e-12) continue;
-      final worldOrigin = transform.transform3(Vector3.zero());
-      final worldTip = transform.transform3(localForce);
-      final worldForce = worldTip - worldOrigin;
-      final bucket = grouped.putIfAbsent(
-        contact.otherBodyId,
-        () => _ReactionAccumulator(),
-      );
-      bucket.impulse.add(worldForce * dt);
-      bucket.weightedPoint.add(contact.worldPoint * worldForce.length);
-      bucket.weight += worldForce.length;
-    }
-    for (final entry in grouped.entries) {
-      final bucket = entry.value;
-      if (bucket.impulse.length2 <= 1e-14) continue;
-      final point = bucket.weight > 1e-9
-          ? bucket.weightedPoint / bucket.weight
-          : Vector3.zero();
-      scene.applyImpulseAtPoint(entry.key, bucket.impulse, point);
     }
   }
 
@@ -290,10 +280,4 @@ class _NearestVertex {
   const _NearestVertex(this.index, this.distance);
   final int index;
   final double distance;
-}
-
-class _ReactionAccumulator {
-  final Vector3 impulse = Vector3.zero();
-  final Vector3 weightedPoint = Vector3.zero();
-  double weight = 0;
 }
