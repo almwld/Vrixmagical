@@ -244,6 +244,7 @@ class PhysicsSceneService {
     required List<Vector3> vertices,
     double maxConvexRadius = 0.02,
     double friction = 0.6,
+    bool sensor = false,
   }) {
     if (vertices.length < 4 || vertices.length > 4096) {
       throw ArgumentError.value(vertices.length, 'vertices.length');
@@ -269,8 +270,9 @@ class PhysicsSceneService {
       gravityFactor: 0,
       mass: 0,
       layer: 1,
-      sensor: false,
-      continuous: true,
+      sensor: sensor,
+      // Jolt sensors only support discrete motion quality.
+      continuous: !sensor,
     );
   }
 
@@ -1227,6 +1229,56 @@ class PhysicsSceneService {
       } finally {
         jolt.jj_shape_release(shape.cast<Void>());
       }
+    });
+  }
+
+  /// Queries the live shape of a body against the rest of this world.
+  ///
+  /// The queried body is excluded from its own results. Jolt returns one
+  /// deepest overlap hit per other body, with a world-space surface normal
+  /// facing the query shape.
+  List<PhysicsRaycastHit> overlapBody(
+    String bodyId, {
+    int layerMask = 0xFFFF,
+    bool includeSensors = false,
+    int maxHits = 64,
+  }) {
+    _ensureAvailable();
+    if (maxHits < 1 ||
+        maxHits > 4096 ||
+        layerMask < 0 ||
+        layerMask > 0xFFFF) {
+      throw ArgumentError('Invalid body-overlap query limits.');
+    }
+    final record = _bodies[bodyId];
+    if (record == null) {
+      throw ArgumentError.value(bodyId, 'bodyId', 'Unknown physics body.');
+    }
+    final shape = jolt.JPH_BodyInterface_GetShape(
+      _getBodyInterface(),
+      record.handle,
+    );
+    if (shape.address == 0) {
+      throw StateError('Jolt could not read the shape for $bodyId.');
+    }
+    final pose = _toPose(bodyWorldTransform(bodyId));
+    return using((arena) {
+      final poseBuffer = _poseBuffer(arena, pose);
+      final hits = arena<jolt.JJ_Hit>(maxHits);
+      var flags = jolt.JJ_QUERY_ALL_HITS;
+      if (includeSensors) flags |= jolt.JJ_QUERY_SENSORS;
+      final count = jolt.jj_overlap(
+        _world,
+        shape,
+        poseBuffer,
+        layerMask,
+        record.handle,
+        flags,
+        hits,
+        maxHits,
+      );
+      if (count < 0) throw StateError('Jolt body-overlap query failed: $count');
+      return _mapHits(hits, math.min(count, maxHits).toInt());
     });
   }
 
