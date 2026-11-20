@@ -301,8 +301,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       anchorWasAdded = true;
 
       final node = ARNode(
-        type: NodeType.webGLB,
-        uri: widget.modelPath == null ? _sampleModel : Uri.file(widget.modelPath!).toString(),
+        type: widget.modelPath == null ? NodeType.webGLB : NodeType.fileSystemAppFolderGLB,
+        uri: widget.modelPath ?? _sampleModel,
         position: Vector3(0, 0.16, 0),
         scale: Vector3(0.12, 0.12, 0.12),
       );
