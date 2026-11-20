@@ -143,8 +143,8 @@ void main() {
       await expectLater(store.complete(), throwsA(isA<FileSystemException>()));
       expect(store.snapshot.isComplete, isFalse);
 
-      await FileSystemEntity.delete(temporaryPath, recursive: true);
-      expect(await FileSystemEntity.type(temporaryPath), FileSystemEntityType.notFound);
+      await Directory(temporaryPath).delete(recursive: true);
+      expect(await Directory(temporaryPath).exists(), isFalse);
 
       // The same session must remain writable after the failed completion.
       await store.addView(view(.8));
