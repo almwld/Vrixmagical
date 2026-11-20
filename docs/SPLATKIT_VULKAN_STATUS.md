@@ -10,6 +10,8 @@
 - Native lifecycle is forwarded through the existing view registry on activity resume/pause and view disposal.
 - Buffered events distinguish world upload, first completed GPU frame, GPU failure, world failure, collider ready and collider failure. Events are queued until Dart attaches, so early load results are not silently lost.
 - Typed Dart controller exposes renderer stats (FPS, frame/GPU/sort times, loaded/drawn splats, SH degree), camera pose, camera orbit/dolly/focus/look, gyroscope motion, quality presets, render scale, SH degree, frame cap, render policy, collider loading, tiled-world loading and benchmark capture.
+- Directory-aware tiled-world import copies the complete folder into app-private storage while preserving relative paths; it rejects missing tilesets and enforces file-count/size limits.
+- The UI reports Vulkan subgroup/Hi-Z/texture capabilities, exposes a Hi-Z policy toggle only when supported, and surfaces policy acceptance/fallback warnings.
 - The viewer UI now reports the first GPU frame separately from world upload, displays GPU diagnostics/stats, offers quality and motion controls, orbit/zoom controls, and imports a GLB collider.
 
 ## Important semantics
