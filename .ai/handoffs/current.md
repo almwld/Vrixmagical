@@ -9,10 +9,10 @@
 Close Jolt↔XPBD coupling, connect scan output to physics, stabilize AR anchors/depth, complete SplatKit/Vulkan host controls and maintain one shared AI delegation/memory system.
 
 ## Current exact-head work
-1. **PR #13** — head 1dda4712de05c186dcfb6155f3ca34d85ea86154; run #278. Native XPBD regression, analyzer and Flutter tests passed; Android debug build was active. Review the per-contact reaction mapper and pure-torque test, then finish release/split/AAB checks.
-2. **PR #14** — head a2c7c785780f8b18a0463d0ec9db1acc9e326c0c; run #286 started. Includes anchor quaternion, CPU RGB-D intrinsics scaling and race-safe pending cloud-anchor callbacks.
-3. **PR #16** — head bcf25022ce95fbe22384cfb22e09a17757103c96; run #275. Flutter analysis/tests passed; Android debug build and native library/16 KiB checks remained.
-4. **PR #15** — head 3fbd99fceccf4c2fb1eebb45df3f04c76e228309; run #271 passed full CI and artifact upload. Keep its memory snapshot reconciled with the latest active PR state.
+1. **PR #13** — head 1dda4712de05c186dcfb6155f3ca34d85ea86154; run #278. Run #278 passed the complete artifact matrix, including the per-contact reaction mapper and Jolt pure-torque test. Physical same-scene/device acceptance remains open.
+2. **PR #14** — head a2c7c785780f8b18a0463d0ec9db1acc9e326c0c; run #288 passed Kotlin anchor/depth tests, Flutter tests and analysis; Android debug build was active. Includes anchor quaternion, CPU RGB-D intrinsics scaling and race-safe pending cloud-anchor callbacks.
+3. **PR #16** — head bcf25022ce95fbe22384cfb22e09a17757103c96; run #294. Flutter analysis and tests passed (including tiled-world directory import and Hi-Z policy controls); Android debug build was active. The earlier run #275 passed full APK/AAB/native/16 KiB checks before these additions.
+4. **PR #15** — head 3fbd99fceccf4c2fb1eebb45df3f04c76e228309; run #287 passed full CI and artifact upload, including the registry validator. This current memory refresh triggers another validation run.
 
 ## Next actions
 - Poll the exact CI runs above; fix failures on their own branches.
