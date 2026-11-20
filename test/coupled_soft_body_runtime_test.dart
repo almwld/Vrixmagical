@@ -56,17 +56,23 @@ void main() {
         scene: physics,
         objectId: 'runtime-test',
         worldTransform: Matrix4.identity(),
-        maxContactDistance: 0.1,
+        maxContactDistance: 0.5,
       );
 
       try {
         physics.addDynamicSphere(
           id: 'runtime-probe',
           worldTransform: Matrix4.identity()
-            ..setTranslation(Vector3(0, 0.12, 0)),
-          radius: 0.09,
+            ..setTranslation(Vector3(0, 0.04, 0)),
+          radius: 0.12,
           mass: 0.2,
           restitution: 0,
+        );
+
+        final directOverlaps = physics.overlapBody('soft:runtime-test');
+        expect(
+          directOverlaps.any((hit) => hit.bodyId == 'runtime-probe'),
+          isTrue,
         );
 
         SoftBodyRenderFrame? frame;
