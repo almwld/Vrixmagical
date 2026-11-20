@@ -17,6 +17,7 @@ import '../../app/app_theme.dart';
 import '../../domain/vrix_object.dart';
 import '../../services/physics_scene_service.dart';
 import '../../services/lg_wing_deck_service.dart';
+import '../../services/model_arabic_labels.dart';
 
 class _PlacedAsset {
   const _PlacedAsset({
@@ -37,7 +38,9 @@ class _PlacedAsset {
 }
 
 class ArSceneScreen extends StatefulWidget {
-  const ArSceneScreen({super.key});
+  const ArSceneScreen({super.key, this.modelPath});
+
+  final String? modelPath;
 
   @override
   State<ArSceneScreen> createState() => _ArSceneScreenState();
@@ -125,7 +128,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     // only after the user explicitly places the first object.
     if (mounted) {
       setState(() {
-        _status = 'كاميرا الواقع المعزز جاهزة · الفيزياء ستُهيّأ عند تثبيت أول مجسم.';
+        _status = widget.modelPath == null ? 'كاميرا الواقع المعزز جاهزة · اضغط سطحاً لإضافة النموذج التجريبي.' : 'جاهز لإدراج المجسم المحلي عند لمس سطح مكتشف.';
       });
     }
   }
@@ -227,7 +230,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         setState(() { _status = 'MediaPipe يعمل حالياً في وحدة مرآة اليد؛ لم يُدمج بعد داخل جلسة AR لتجنب تعارض الكاميرا.'; });
         break;
       case 'scanInfo':
-        setState(() { _status = 'بيانات RGB-D تحفظ من وحدة مسح الأجسام. دمج Voxel Fusion وإعادة بناء GLB لم يكتمل بعد.'; });
+        setState(() { _status = 'مسح RGB-D ودمج النقاط وإعادة بناء شبكة GLB متاح من وحدة المسح؛ تحقق من نتيجة كل مسح قبل التصدير.'; });
         break;
       case 'hideDeck':
         unawaited(LgWingDeckService.instance.hide());
@@ -298,8 +301,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       anchorWasAdded = true;
 
       final node = ARNode(
-        type: NodeType.webGLB,
-        uri: _sampleModel,
+        type: widget.modelPath == null ? NodeType.webGLB : NodeType.fileSystemAppFolderGLB,
+        uri: widget.modelPath ?? _sampleModel,
         position: Vector3(0, 0.16, 0),
         scale: Vector3(0.12, 0.12, 0.12),
       );
@@ -314,8 +317,10 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       final identity = VrixObject(
         id: node.name,
         source: ObjectSource.library,
-        displayName: 'Duck sample',
-        meshPath: _sampleModel,
+        displayName: widget.modelPath == null
+            ? 'بطة'
+            : ModelArabicLabels.displayName(widget.modelPath!.split('/').last.replaceAll('.glb', '')),
+        meshPath: widget.modelPath ?? _sampleModel,
         physics: const PhysicsProfile(
           mass: 1,
           collider: ColliderShape.box,
@@ -400,8 +405,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
           ),
         );
         _status = physics == null
-            ? 'تم تثبيت المجسم · محرك الفيزياء غير متاح.'
-            : 'تم تثبيت المجسم · تصادم وجاذبية Jolt مفعّلان.';
+            ? 'تم تثبيت ${identity.displayName} · محرك الفيزياء غير متاح.'
+            : 'تم تثبيت ${identity.displayName} · تصادم وجاذبية Jolt مفعّلان.';
       });
     } catch (error) {
       if (dynamicBodyId != null) _physics?.removeBody(dynamicBodyId);

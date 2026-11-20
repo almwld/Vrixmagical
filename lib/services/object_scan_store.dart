@@ -211,7 +211,14 @@ class ObjectScanStore {
       throw StateError('Capture at least three distinct views before completing a scan.');
     }
     _complete = true;
-    await _writeManifest();
+    try {
+      await _writeManifest();
+    } catch (_) {
+      // Keep the in-memory session writable when the durable completion marker
+      // could not be committed to the manifest.
+      _complete = false;
+      rethrow;
+    }
     return snapshot;
   }
 
