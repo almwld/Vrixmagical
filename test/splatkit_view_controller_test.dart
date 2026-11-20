@@ -18,7 +18,7 @@ void main() {
             'gpuDescription': 'Test Vulkan GPU',
             'motionEnabled': false,
             'cameraPose': {'x': 1.0, 'y': 2.0, 'z': 3.0},
-            'capabilities': {'supportsSubgroups': true},
+            'capabilities': {'supportsSubgroups': true, 'supportsHiZOcclusion': true},
           };
         case 'readStats':
           return {
@@ -30,6 +30,8 @@ void main() {
         case 'applyQuality':
         case 'setMotionEnabled':
           return true;
+        case 'applyRenderPolicy':
+          return {'accepted': true, 'warnings': <String>[]};
         case 'orbit':
         case 'dolly':
         case 'focus':
@@ -54,6 +56,9 @@ void main() {
 
     await controller.applyQuality('high');
     expect(controller.quality, 'high');
+    await controller.setHiZOcclusion(true);
+    expect(controller.hiZOcclusionEnabled, isTrue);
+    expect(controller.renderPolicyAccepted, isTrue);
     expect(await controller.setMotionEnabled(true), isTrue);
     expect(await controller.orbit(0.2, 0.1), isTrue);
     expect(await controller.dolly(-0.1), isTrue);
@@ -64,6 +69,7 @@ void main() {
       'readStats',
       'applyQuality',
       'setMotionEnabled',
+      'applyRenderPolicy',
       'orbit',
       'dolly',
       'focus',
