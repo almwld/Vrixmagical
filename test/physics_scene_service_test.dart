@@ -122,6 +122,42 @@ void main() {
       expect(casts.any((hit) => hit.bodyId == 'query-target'), isTrue);
     });
 
+    test('sensor convex proxies query contacts without resolving rigid bodies', () {
+      physics.addKinematicConvexHull(
+        id: 'soft-proxy',
+        worldTransform: Matrix4.identity(),
+        vertices: <Vector3>[
+          Vector3(-0.3, -0.3, -0.3),
+          Vector3(0.3, -0.3, -0.3),
+          Vector3(-0.3, 0.3, -0.3),
+          Vector3(0.3, 0.3, -0.3),
+          Vector3(-0.3, -0.3, 0.3),
+          Vector3(0.3, -0.3, 0.3),
+          Vector3(-0.3, 0.3, 0.3),
+          Vector3(0.3, 0.3, 0.3),
+        ],
+        sensor: true,
+      );
+      physics.addDynamicSphere(
+        id: 'overlapping-rigid',
+        worldTransform: Matrix4.identity()
+          ..setTranslation(Vector3(0.45, 0, 0)),
+        radius: 0.3,
+        mass: 1,
+      );
+
+      physics.advance(1 / 60);
+      final hits = physics.overlapBody('soft-proxy');
+      final hit = hits.firstWhere((value) => value.bodyId == 'overlapping-rigid');
+      expect(hit.normal.x, lessThan(-0.5));
+
+      // A sensor reports the overlap but does not apply Jolt's rigid contact
+      // correction. XPBD is therefore the only solver that responds to it.
+      final rigidPosition =
+          physics.bodyWorldTransform('overlapping-rigid').getTranslation();
+      expect(rigidPosition.x, closeTo(0.45, 0.02));
+    });
+
     test('supports constraints and preserves joint graph during body teleports', () {
       physics.addDynamicBox(
         id: 'joint-a',
@@ -226,6 +262,38 @@ void main() {
       final moved = physics.bodyWorldTransform('impulse-ball').getTranslation();
       expect(moved.y, greaterThan(0.05));
       expect(moved.x, greaterThan(0));
+    });
+
+    test('opposite point impulses preserve a pure rigid-body torque couple', () {
+      physics.addDynamicBox(
+        id: 'torque-box',
+        worldTransform: Matrix4.identity()
+          ..setTranslation(Vector3(0, 2, 0)),
+        halfExtents: Vector3.all(0.25),
+        mass: 1,
+        friction: 0,
+        restitution: 0,
+      );
+      final before = physics.bodyWorldTransform('torque-box');
+
+      // The net linear impulse is zero, but both point impulses create torque
+      // in the same direction about the box centre.
+      physics.applyImpulseAtPoint(
+        'torque-box',
+        Vector3(0, 0, 1),
+        Vector3(1, 2, 0),
+      );
+      physics.applyImpulseAtPoint(
+        'torque-box',
+        Vector3(0, 0, -1),
+        Vector3(-1, 2, 0),
+      );
+      physics.advance(1 / 60);
+
+      final after = physics.bodyWorldTransform('torque-box');
+      expect((after.entry(0, 0) - before.entry(0, 0)).abs(), greaterThan(1e-3));
+      expect((after.entry(2, 0) - before.entry(2, 0)).abs(), greaterThan(1e-3));
+      expect(after.getTranslation().z, closeTo(0, 0.01));
     });
 
     test('bounds fixed-step catch-up after long frames', () {

@@ -12,12 +12,15 @@ import 'package:vrix_soft_body/vrix_soft_body.dart' show SoftBodyMeshData;
 class TetrahedralizedScan {
   const TetrahedralizedScan({
     required this.mesh,
+    required this.worldOrigin,
     required this.minimumAbsoluteSixVolume,
     required this.maximumAbsoluteSixVolume,
     required this.boundaryFaceCount,
   });
 
   final SoftBodyMeshData mesh;
+  /// Translation that maps the centered solver-local mesh back into AR world metres.
+  final Vector3 worldOrigin;
   final double minimumAbsoluteSixVolume;
   final double maximumAbsoluteSixVolume;
   final int boundaryFaceCount;
@@ -180,6 +183,11 @@ class VoxelTetrahedralizer {
     );
     final result = TetrahedralizedScan(
       mesh: mesh,
+      worldOrigin: Vector3(
+        originX * voxelSizeMeters,
+        originY * voxelSizeMeters,
+        originZ * voxelSizeMeters,
+      ),
       minimumAbsoluteSixVolume: minSixVolume,
       maximumAbsoluteSixVolume: maxSixVolume,
       boundaryFaceCount: surface.length ~/ 3,

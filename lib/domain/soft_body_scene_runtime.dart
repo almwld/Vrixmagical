@@ -75,6 +75,11 @@ class VrixSoftBodySceneRuntime {
 
   bool get isDisposed => _disposed;
   int get coupledSteps => coupling.coupledSteps;
+  int get activeContactCount => coupling.activeContactCount;
+  int get lastAppliedReactionCount => coupling.lastAppliedReactionCount;
+  Vector3 get lastAppliedReactionImpulse =>
+      coupling.lastAppliedReactionImpulse;
+  Vector3 get lastContactNormalWorld => coupling.lastContactNormalWorld;
 
   /// Creates the native deformable body from a completed scan's tetrahedral
   /// volume and registers its kinematic collision proxy in the existing Jolt
