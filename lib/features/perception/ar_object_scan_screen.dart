@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -37,8 +38,13 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   ARSessionManager? _session;
   ARObjectManager? _objects;
   String? _deformableMeshId;
+  String? _probeBodyId;
+  String? _probeMeshId;
+  List<double>? _probeMeshPositions;
   bool _meshUploadInFlight = false;
+  bool _probeUploadInFlight = false;
   bool _meshUploadFaultReported = false;
+  bool _probeUploadFaultReported = false;
   InteractiveSegmenter? _segmenter;
   ObjectScanStore? _store;
   String? _photoPath;
