@@ -62,21 +62,27 @@ jobs:
         run: dart run mediapipe_core:bundle_models
 
       - name: Format source
-        run: dart format lib test packages/vrix_soft_body/lib
+        run: dart format lib test packages/vrix_soft_body/lib packages/flutter_reality_vrix/lib packages/flutter_reality_vrix/test
 
       - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib
+        run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib packages/flutter_reality_vrix/lib packages/flutter_reality_vrix/test
 
       - name: Analyze app and native plugin Dart API
         run: |
           flutter analyze --no-fatal-infos
-          dart analyze packages/vrix_soft_body
+          dart analyze packages/vrix_soft_body packages/flutter_reality_vrix
 
       - name: Unit and widget tests
         env:
           # Exercise the same native XPBD ABI in host integration tests.
           LD_LIBRARY_PATH: /tmp/vrix-soft-body-native
         run: flutter test --reporter expanded
+
+      - name: Flutter AR plugin package tests
+        working-directory: packages/flutter_reality_vrix
+        run: |
+          flutter pub get
+          flutter test --reporter expanded
 
       - name: Android debug APK
         run: flutter build apk --debug
