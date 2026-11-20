@@ -457,6 +457,9 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       final previousProbeMeshId = _probeMeshId;
       final previousRuntime = _softBodyRuntime;
       final previousPhysics = _physicsScene;
+      if (_handPerception != null || _handInteractionEnabled) {
+        await _stopHandXpbdInteraction();
+      }
       _softBodyTicker?.cancel();
       _handXpbdBridge?.clear();
       _handXpbdBridge = null;
