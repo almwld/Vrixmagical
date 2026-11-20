@@ -8,7 +8,7 @@ Purpose: establish an evidence-based closure plan without changing production co
 
 - Default branch: `main`; repository is public and writable by the connected account.
 - Latest commit message says the Jolt, XPBD and synchronized RGB-D work was integrated after native XPBD, Flutter analysis/tests, Android debug/release APK and AAB validation.
-- The connector returned no commit status entries and no PR-triggered workflow runs for the baseline SHA. Therefore this audit does not independently certify those CI results.
+- The connector returned no commit status entries or PR-triggered workflow runs for the original baseline SHA. New PR workflow evidence is now available for #7, #9 and #10 as recorded above.
 - Main contains Jolt rigid-body integration, synchronized RGB-D capture, voxel reconstruction/export and a native XPBD solver path.
 - Main also contains source for a bidirectional Jolt↔XPBD coordinator on a separate branch; it is not yet part of main.
 - Main's README is stale/inconsistent with newer scanning and XPBD documentation and must be reconciled only after the source/CI audit.
@@ -16,11 +16,11 @@ Purpose: establish an evidence-based closure plan without changing production co
 ## Pull requests found
 
 Open PR search returned:
-- #7 — bidirectional Jolt ↔ XPBD soft-body coupling.
-- #9 — Android launcher icon generation from canonical SVG.
-- #10 — isolate AR startup from native Jolt initialization.
+- #7 — bidirectional Jolt ↔ XPBD soft-body coupling — remains open. CI run #254 passed, but an engineering review comment records a contact-identity/multi-contact correctness hold and missing coupling integration tests.
+- #9 — Android launcher icon generation from canonical SVG — merged as `b9f8e3625a30ba3ebe811d63dc2b7d37e93ec053`; CI run #248 passed, including SVG-derived icon verification and Android debug/release APK/AAB builds.
+- #10 — isolate AR startup from native Jolt initialization — merged as `40bf8d901d9645793ea82cc4f6e2ea82e2899c4e`; CI run #249 passed, including analysis, tests and Android debug/release APK/AAB builds.
 
-Closed/merged search returned #1 and #6. The search connector did not provide reliable state metadata for all historical PRs; verify each PR page before merging or closing anything.
+The audit PR #11 itself remains a documentation-only draft. Historical PRs #1 and #6 were found closed/merged.
 
 ## Branch divergence from main
 
