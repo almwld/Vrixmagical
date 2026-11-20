@@ -60,7 +60,7 @@ class _SettingsDetailScreenState extends State<_SettingsDetailScreen> {
             _switches[entry.key] = entry.value as bool;
           }
         }
-        if (values['quality'] is num) _quality = (values['quality'] as num).toDouble().clamp(0.0, 1.0);
+        if (values['quality'] is num) _quality = (values['quality'] as num).toDouble().clamp(0.0, 1.0).toDouble();
         if (values['touch'] is num) _touch = (values['touch'] as num).toDouble().clamp(0.0, 1.0);
       });
     });
@@ -82,9 +82,9 @@ class _SettingsDetailScreenState extends State<_SettingsDetailScreen> {
       case _SettingsGroup.interface:
         children.addAll([_toggle('rtl','واجهة عربية من اليمين إلى اليسار','تطبيق اتجاه RTL على صفحات Material والنصوص والأزرار.'),_toggle('animations','انتقالات الواجهة','تفعيل انتقالات الصفحات والحركات غير المرتبطة بالمحاكاة.'),const ListTile(title:Text('لغة الواجهة'),subtitle:Text('العربية — اتجاه RTL مفعل افتراضياً')),const ListTile(title:Text('المظهر'),subtitle:Text('داكن مكاني · تركواز وأزرق'))]); break;
       case _SettingsGroup.engine:
-        children.addAll([_toggle('showNames','إظهار التسميات العربية','عرض أسماء الأصول والتسميات الدلالية بالعربية حيث تتوفر بياناتها.'),_toggle('pbr','خامات PBR والإضاءة','استخدام خامات GLB المضمنة كما يدعمها عارض المحرك.'),_slider('ميزانية جودة العرض',_quality,(v)=>setState(()=>_quality=v)),const ListTile(title:Text('تنسيقات الاستيراد'),subtitle:Text('GLB / GLTF')),const ListTile(title:Text('تصدير المشهد'),subtitle:Text('تصدير GLB من وحدات إعادة البناء عند توفر ملف صالح.'))]); break;
+        children.addAll([_toggle('showNames','إظهار التسميات العربية','عرض أسماء الأصول والتسميات الدلالية بالعربية حيث تتوفر بياناتها.'),_toggle('pbr','خامات PBR والإضاءة','استخدام خامات GLB المضمنة كما يدعمها عارض المحرك.'),_slider('ميزانية جودة العرض',_quality,(v){setState(()=>_quality=v);_persist();}),const ListTile(title:Text('تنسيقات الاستيراد'),subtitle:Text('GLB / GLTF')),const ListTile(title:Text('تصدير المشهد'),subtitle:Text('تصدير GLB من وحدات إعادة البناء عند توفر ملف صالح.'))]); break;
       case _SettingsGroup.interaction:
-        children.addAll([_toggle('hand','تتبع اليد','يتطلب حجز جلسة الكاميرا وعدم تشغيل مرآة اليد بالتزامن مع ARCore.'),_toggle('breathing','التنفس والحركة الدقيقة','يتطلب شخصية ذات هيكل عظمي مدعوم من العارض.'),_toggle('gaze','تتبع النظر والرأس','يتطلب Rig وبيانات عظام وواجهة تحريك مدعومة.'),_toggle('physics','محاكاة Jolt وXPBD','تفعيل محاكاة الأجسام الصلبة واللينة.'),_slider('عتبة قرب التلامس',_touch,(v)=>setState(()=>_touch=v))]); break;
+        children.addAll([_toggle('hand','تتبع اليد','يتطلب حجز جلسة الكاميرا وعدم تشغيل مرآة اليد بالتزامن مع ARCore.'),_toggle('breathing','التنفس والحركة الدقيقة','يتطلب شخصية ذات هيكل عظمي مدعوم من العارض.'),_toggle('gaze','تتبع النظر والرأس','يتطلب Rig وبيانات عظام وواجهة تحريك مدعومة.'),_toggle('physics','محاكاة Jolt وXPBD','تفعيل محاكاة الأجسام الصلبة واللينة.'),_slider('عتبة قرب التلامس',_touch,(v){setState(()=>_touch=v);_persist();})]); break;
       case _SettingsGroup.device:
         children.addAll([_toggle('wing','لوحة LG Wing الثانوية','إظهار لوحة التحكم على الشاشة الثانية عند توفرها.'),const ListTile(title:Text('الواقع المعزز'),subtitle:Text('ARCore · تتحدد الإمكانات حسب الجهاز.')),const ListTile(title:Text('المعمارية'),subtitle:Text('تُنتج CI ملفات APK منفصلة لكل ABI مدعوم.'))]); break;
       case _SettingsGroup.privacy:
