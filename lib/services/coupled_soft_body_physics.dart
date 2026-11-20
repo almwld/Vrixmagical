@@ -4,6 +4,7 @@ import 'package:vector_math/vector_math_64.dart';
 
 import 'package:vrix_soft_body/vrix_soft_body.dart';
 import 'physics_scene_service.dart';
+import '../domain/soft_body_contact_policy.dart';
 
 /// Couples one XPBD deformable mesh to Jolt through a kinematic convex proxy.
 ///
@@ -168,9 +169,20 @@ class CoupledSoftBodyPhysics {
       final nearest = _nearestVertex(state.positions, localPoint);
       if (nearest.index < 0 || nearest.distance > maxContactDistance) continue;
 
-      // Native XPBD stores one contact constraint per vertex. Keep the Dart
-      // manifold keyed by that same vertex so multiple contact points on one
-      // rigid body do not overwrite one another or double-apply one reaction.
+      // Native XPBD stores one contact constraint per vertex. Multiple rigid
+      // bodies can touch the same vertex, so arbitrate ownership deterministically
+      // rather than allowing event order to overwrite the active constraint.
+      final currentContact = _contacts[nearest.index];
+      if (!SoftBodyContactPolicy.shouldAcceptContact(
+        currentBodyId: currentContact?.otherBodyId,
+        incomingBodyId: otherBody,
+      )) {
+        continue;
+      }
+      if (currentContact != null &&
+          currentContact.otherBodyId != otherBody) {
+        engine.clearContact(body: softBody, vertexIndex: nearest.index);
+      }
       engine.setContact(
         body: softBody,
         vertexIndex: nearest.index,
