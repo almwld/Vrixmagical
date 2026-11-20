@@ -1,3 +1,5 @@
+> This project inherits the repository-wide delegation, permissions and durable-memory contract from ../AI_TEAM.md and ../.ai/README.md. The rules below add Telekinesis-CV-specific collaboration constraints; where they differ, the root protocol governs.
+
 # AI Team Protocol (Claude Code + Codex CLI)
 
 Governs how Claude Code and Codex CLI collaborate in this project. Both read this before doing
