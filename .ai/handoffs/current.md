@@ -15,7 +15,7 @@ Close Jolt↔XPBD coupling, connect scan output to physics, stabilize AR anchors
 4. **PR #15** — head 3fbd99fceccf4c2fb1eebb45df3f04c76e228309; run #287 passed full CI and artifact upload, including the registry validator. This current memory refresh triggers another validation run.
 
 ## Next actions
-- Poll the exact CI runs above; fix failures on their own branches.
+- Poll PR #14 run #288, PR #16 run #294 and PR #15 run #296; fix failures on their own branches. PR #13 run #278 is fully green.
 - Do not merge PR #13 into main; it is based on the PR #7 coupling branch and still needs same-scene integration/device acceptance.
 - Do not claim live AR mesh rendering: the current scan screen uses a renderer-neutral isometric preview.
 - Do not claim Vulkan device readiness from CI; wait for a physical device run.
@@ -25,5 +25,5 @@ Close Jolt↔XPBD coupling, connect scan output to physics, stabilize AR anchors
 - Jolt/XPBD: actual force direction, per-contact torque, contact lifecycle and same-scene dynamic-body interaction.
 - Scan: persistent scene ownership and live AR mesh renderer.
 - AR: anchor lifecycle/relocalization and RGB-D alignment on LM-F100.
-- SplatKit: exact beta.3 bridge compile, native library packaging, 16 KiB alignment, first GPU frame, stats and lifecycle on a physical Vulkan device.
+- SplatKit: exact beta.3 bridge compile, native library packaging, 16 KiB alignment, tiled-world streaming, Hi-Z fallback, first GPU frame, stats and lifecycle on a physical Vulkan device.
 - AI: one orchestrator, one writer per branch, bounded specialist delegation, validator passing, no secrets/raw reasoning in memory.
