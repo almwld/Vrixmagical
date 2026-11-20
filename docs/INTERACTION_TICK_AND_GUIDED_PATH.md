@@ -66,7 +66,9 @@ Contact forces and path constraints may drive local XPBD boundary constraints on
 
 ## Current implementation gaps
 
-- Jolt's current Dart adapter uses a small fixed set of broad collision layers; it does not yet expose a per-body pair-filter matrix for guided paths.
+- `PhysicsSceneService` currently initializes every row of `JJ_WorldSettings.collides` to `0xFFFF`; its bodies use broad static / moving / sensor layers. The adapter does not expose a safe, scoped per-body pair-filter operation.
+- The inspected `just_jolt` C layer exposes a 16 × 16 world collision-layer table and `jj_body_set_layer`; its generated bindings expose Jolt collision-group assignment, but no group-filter construction / per-pair policy API is surfaced by the wrapper. Merely changing a body's layer would affect every body in that layer, so it is not an acceptable substitute for a path-specific pair filter.
+- Before guided traversal can alter collisions, add a native bridge that owns explicit pair registrations (or a dedicated Jolt group-filter implementation), validates both body handles belong to the same world, and restores the previous policy on exit/disposal. Preserve ordinary world collisions for all unregistered pairs. Add native tests proving an allowed guide pair is filtered while a third-party environment body still collides.
 - The current soft-body contact ABI stores one contact per vertex. Multi-contact manifolds and barycentric surface contacts are future work.
 - The current coupled adapter uses a convex proxy approximation. It is not an exact deformable-vs-triangle-mesh narrowphase.
 - IK target solving is not yet part of the coupled runtime tick.
