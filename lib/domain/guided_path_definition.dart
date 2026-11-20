@@ -14,6 +14,7 @@ class GuidedPathDefinition {
     required Iterable<double> clearanceRadii,
     this.entryTolerance = 0.02,
     this.exitTolerance = 0.02,
+    this.permittedDirection = GuidedPathDirection.both,
   })  : id = id.trim(),
         controlPoints = List<Vector3>.unmodifiable(
           controlPoints.map(Vector3.copy),
@@ -58,6 +59,7 @@ class GuidedPathDefinition {
   final List<double> clearanceRadii;
   final double entryTolerance;
   final double exitTolerance;
+  final GuidedPathDirection permittedDirection;
   late final List<double> _cumulativeLengths;
   late final double totalLength;
 
@@ -65,12 +67,14 @@ class GuidedPathDefinition {
   GuidedPathProjection project(
     Vector3 point, {
     required double movingRadius,
+    int travelDirection = 1,
   }) {
     if (!point.x.isFinite ||
         !point.y.isFinite ||
         !point.z.isFinite ||
         !movingRadius.isFinite ||
-        movingRadius < 0) {
+        movingRadius < 0 ||
+        (travelDirection != -1 && travelDirection != 1)) {
       throw ArgumentError('Point and moving radius must be finite and valid.');
     }
 
@@ -110,9 +114,14 @@ class GuidedPathDefinition {
     final inEntryZone = arcLength <= entryTolerance;
     final inExitZone = totalLength - arcLength <= exitTolerance;
     final fits = lateralDistance + movingRadius <= clearance;
-    final phase = !fits
-        ? GuidedPathPhase.outside
-        : inEntryZone
+    final directionAllowed = permittedDirection == GuidedPathDirection.both ||
+        (permittedDirection == GuidedPathDirection.forward && travelDirection > 0) ||
+        (permittedDirection == GuidedPathDirection.reverse && travelDirection < 0);
+    final phase = !directionAllowed
+        ? GuidedPathPhase.disallowedDirection
+        : !fits
+            ? GuidedPathPhase.outside
+            : inEntryZone
             ? GuidedPathPhase.entry
             : inExitZone
                 ? GuidedPathPhase.exit
@@ -133,7 +142,9 @@ class GuidedPathDefinition {
   }
 }
 
-enum GuidedPathPhase { outside, entry, inside, exit }
+enum GuidedPathDirection { both, forward, reverse }
+
+enum GuidedPathPhase { outside, entry, inside, exit, disallowedDirection }
 
 class GuidedPathProjection {
   GuidedPathProjection({
