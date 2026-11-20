@@ -264,6 +264,38 @@ void main() {
       expect(moved.x, greaterThan(0));
     });
 
+    test('opposite point impulses preserve a pure rigid-body torque couple', () {
+      physics.addDynamicBox(
+        id: 'torque-box',
+        worldTransform: Matrix4.identity()
+          ..setTranslation(Vector3(0, 2, 0)),
+        halfExtents: Vector3.all(0.25),
+        mass: 1,
+        friction: 0,
+        restitution: 0,
+      );
+      final before = physics.bodyWorldTransform('torque-box');
+
+      // The net linear impulse is zero, but both point impulses create torque
+      // in the same direction about the box centre.
+      physics.applyImpulseAtPoint(
+        'torque-box',
+        Vector3(0, 0, 1),
+        Vector3(1, 2, 0),
+      );
+      physics.applyImpulseAtPoint(
+        'torque-box',
+        Vector3(0, 0, -1),
+        Vector3(-1, 2, 0),
+      );
+      physics.advance(1 / 60);
+
+      final after = physics.bodyWorldTransform('torque-box');
+      expect((after.entry(0) - before.entry(0)).abs(), greaterThan(1e-3));
+      expect((after.entry(2) - before.entry(2)).abs(), greaterThan(1e-3));
+      expect(after.getTranslation().z, closeTo(0, 0.01));
+    });
+
     test('bounds fixed-step catch-up after long frames', () {
       expect(physics.advance(1 / 30), 2);
       expect(physics.advance(10), 5);
