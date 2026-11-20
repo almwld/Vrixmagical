@@ -4,12 +4,11 @@ import '../features/home/home_screen.dart';
 
 class VirxMagicalApp extends StatelessWidget {
   const VirxMagicalApp({super.key});
-
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'VirxMagical',
-    debugShowCheckedModeBanner: false,
-    theme: AppTheme.dark,
-    home: const HomeScreen(),
+    title:'VirxMagical', debugShowCheckedModeBanner:false, theme:AppTheme.dark,
+    locale:const Locale('ar'), supportedLocales:const [Locale('ar')],
+    home:const Directionality(textDirection:TextDirection.rtl,child:HomeScreen()),
+    builder:(context,child)=>Directionality(textDirection:TextDirection.rtl,child:child??const SizedBox.shrink()),
   );
 }
