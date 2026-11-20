@@ -1,6 +1,6 @@
 # Reconstruction pipeline — implementation and acceptance
 
-This workstream is independent of the Jolt↔XPBD coupling PR. It converges into one final Android release candidate, but implementation remains split into reviewable commits so a green build cannot conceal missing algorithms.
+This workstream and the Jolt↔XPBD runtime converge into one final Android release candidate. They remain separate layers: rigid/deformable interaction does not turn the current RGB-D voxel baseline into photogrammetry, NeRF, or independent SLAM.
 
 ## Required pipelines
 
@@ -16,9 +16,18 @@ This workstream is independent of the Jolt↔XPBD coupling PR. It converges into
 
 ## Current implementation boundary
 
-The app already has registered RGB-D capture, masked point fusion, voxel occupancy mesh export and tetrahedral XPBD input. These are the existing RGB-D baseline, not photogrammetry, NeRF, or a standalone SLAM implementation. The GLB exporter currently emits positions/normals/indices; UVs and textures are not yet present.
+The app has registered RGB-D capture, masked point fusion, voxel occupancy mesh export and tetrahedral XPBD input. The AR renderer now has a native Filament GeometryNode bridge for bounded dynamic vertex/index buffers; the scan screen streams XPBD surface positions into the live AR scene. A Jolt kinematic sensor proxy queries rigid-body overlaps, feeds contact constraints to XPBD, and maps XPBD reactions back to dynamic Jolt bodies. A visible dynamic probe is rendered in AR so the contact path can be observed. These are interaction/rendering capabilities layered over the existing RGB-D baseline—not photogrammetry, NeRF, or independent SLAM. The GLB exporter currently emits positions/normals/indices; UVs and textures are not yet present.
 
 The new reconstruction contracts enforce frame timing, camera intrinsics/pose, depth confidence and output metadata. Unavailable algorithms must return an explicit unsupported state; placeholder outputs are forbidden.
+
+## Live AR deformation and Jolt↔XPBD acceptance
+
+- The Flutter manager validates finite positions, triangle indices, transforms and mobile upload budgets before sending a mesh frame to the native renderer.
+- The Android plugin owns the Filament geometry/material resources and updates vertex buffers in place; topology is fixed for one mesh lifetime.
+- The scan runtime advances Jolt and XPBD in a deterministic order, refreshes sensor-proxy overlaps, applies XPBD contact constraints, and applies per-contact reaction impulses to dynamic rigid bodies.
+- A low-poly rigid probe is also uploaded as an AR mesh and follows its Jolt body transform. This makes the test contact path visible instead of reporting only solver counters.
+- Automated evidence includes native solver regression, Dart bridge validation, Jolt sensor-overlap tests and a native coupled-runtime test. The renderer is rate-limited to approximately 15 uploads/second on mobile and enforces 25,000 vertices / 50,000 triangles per dynamic mesh.
+- Remaining acceptance: verify actual deformation, probe response, frame time, GPU memory, camera lifecycle and thermal behavior on the physical LG Wing LM-F100. CI does not replace this device test.
 
 ## Implementation sequence
 
