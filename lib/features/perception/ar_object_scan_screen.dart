@@ -517,7 +517,12 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     }
   }
 
-  void _spawnCouplingProbe({
+  ({
+    String bodyId,
+    List<double> positions,
+    List<int> triangleIndices,
+    Matrix4 worldTransform,
+  }) _spawnCouplingProbe({
     required PhysicsSceneService physics,
     required VrixSoftBodySceneRuntime runtime,
     required String scanId,
@@ -532,7 +537,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     if (!minY.isFinite || !maxY.isFinite || maxY <= minY) {
       throw StateError('Unable to determine a stable soft-body contact probe position.');
     }
-    final topThreshold = maxY - ((maxY - minY) * 0.08).clamp(0.02, 0.08);
+    final topThreshold =
+        maxY - ((maxY - minY) * 0.08).clamp(0.02, 0.08).toDouble();
     var topX = 0.0;
     var topZ = 0.0;
     var topCount = 0;
@@ -550,15 +556,53 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final localPosition = Vector3(topX, maxY + radius + 0.06, topZ);
     final worldPosition = runtime.worldTransform.transform3(localPosition);
     final probeId = 'scan-probe-$scanId';
+    final transform = Matrix4.identity()..setTranslation(worldPosition);
     physics.addDynamicSphere(
       id: probeId,
-      worldTransform: Matrix4.identity()..setTranslation(worldPosition),
+      worldTransform: transform,
       radius: radius,
       mass: 0.2,
       friction: 0.4,
       restitution: 0,
       continuous: true,
     );
+    final sphere = _buildProbeSphere(radius);
+    return (
+      bodyId: probeId,
+      positions: sphere.positions,
+      triangleIndices: sphere.triangleIndices,
+      worldTransform: physics.bodyWorldTransform(probeId),
+    );
+  }
+
+  ({List<double> positions, List<int> triangleIndices}) _buildProbeSphere(
+    double radius,
+  ) {
+    const latitudeSegments = 8;
+    const longitudeSegments = 12;
+    final positions = <double>[];
+    for (var latitude = 0; latitude <= latitudeSegments; latitude++) {
+      final phi = math.pi * latitude / latitudeSegments;
+      final ringRadius = math.sin(phi) * radius;
+      final y = math.cos(phi) * radius;
+      for (var longitude = 0; longitude <= longitudeSegments; longitude++) {
+        final theta = 2 * math.pi * longitude / longitudeSegments;
+        positions
+          ..add(ringRadius * math.cos(theta))
+          ..add(y)
+          ..add(ringRadius * math.sin(theta));
+      }
+    }
+    final indices = <int>[];
+    final row = longitudeSegments + 1;
+    for (var latitude = 0; latitude < latitudeSegments; latitude++) {
+      for (var longitude = 0; longitude < longitudeSegments; longitude++) {
+        final a = latitude * row + longitude;
+        final b = a + row;
+        indices.addAll([a, b, a + 1, b, b + 1, a + 1]);
+      }
+    }
+    return (positions: positions, triangleIndices: indices);
   }
 
   void _uploadDeformableMeshFrame(List<double> positions) {
