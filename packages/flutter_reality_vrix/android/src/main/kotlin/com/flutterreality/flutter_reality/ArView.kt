@@ -650,9 +650,6 @@ class ArView(
         val isRaw: Boolean, val isReprojected: Boolean, val intrinsics: Map<String, Any>,
     )
 
-    private fun intrinsicsMap(fx: Float, fy: Float, cx: Float, cy: Float, w: Int, h: Int) =
-        mapOf<String, Any>("fx" to fx.toDouble(), "fy" to fy.toDouble(), "cx" to cx.toDouble(),
-            "cy" to cy.toDouble(), "width" to w, "height" to h)
 
     private fun copyYuv(image: Image): ByteArray {
         val w=image.width; val h=image.height
@@ -695,11 +692,12 @@ class ArView(
         // intrinsics. Texture intrinsics can describe a cropped GPU texture and
         // would shift the RGB-D projection on devices with a different crop.
         val intr=frame.camera.imageIntrinsics; val f=intr.focalLength; val c=intr.principalPoint; val d=intr.imageDimensions
-        val sx=w.toFloat()/d[0]; val sy=h.toFloat()/d[1]; val timestamp=image.timestamp
+        val scaledIntrinsics = scaleDepthIntrinsics(f[0], f[1], c[0], c[1], d[0], d[1], w, h)
+        val timestamp=image.timestamp
         val reprojection=raw && lastRawDepthTimestamp==timestamp
         if(raw) lastRawDepthTimestamp=timestamp
         return DepthCopy(w,h,timestamp,values.array(),confidence,hasConfidence,raw,reprojection,
-            intrinsicsMap(f[0]*sx,f[1]*sy,c[0]*sx,c[1]*sy,w,h))
+            scaledIntrinsics.toChannelMap())
     }
 
     private fun tryCaptureSynchronizedFrame(frame: Frame) {
