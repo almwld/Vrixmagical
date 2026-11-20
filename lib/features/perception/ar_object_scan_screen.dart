@@ -365,7 +365,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     }
   }
 
-  Future<void> _spawnCouplingProbe() async {
+  void _spawnCouplingProbe() {
     final runtime = _softBodyRuntime;
     final physics = _physicsScene;
     if (runtime == null || physics == null || _probeBodyId != null) return;
