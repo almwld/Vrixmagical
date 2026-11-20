@@ -22,14 +22,14 @@ class GuidedPathDefinition {
         clearanceRadii = List<double>.unmodifiable(clearanceRadii) {
     if (this.id.isEmpty ||
         this._controlPoints.length < 2 ||
-        this.clearanceRadii.length != this.controlPoints.length ||
+        this.clearanceRadii.length != _controlPoints.length ||
         !entryTolerance.isFinite ||
         entryTolerance < 0 ||
         !exitTolerance.isFinite ||
         exitTolerance < 0) {
       throw const FormatException('Invalid guided-path definition.');
     }
-    if (this.controlPoints.any(
+    if (_controlPoints.any(
           (point) =>
               !point.x.isFinite || !point.y.isFinite || !point.z.isFinite,
         ) ||
@@ -41,9 +41,9 @@ class GuidedPathDefinition {
 
     var length = 0.0;
     final cumulative = <double>[0];
-    for (var i = 1; i < this.controlPoints.length; i++) {
+    for (var i = 1; i < _controlPoints.length; i++) {
       final segmentLength =
-          this.controlPoints[i].distanceTo(this.controlPoints[i - 1]);
+          _controlPoints[i].distanceTo(_controlPoints[i - 1]);
       if (segmentLength <= 1e-8) {
         throw const FormatException('Guided path has a zero-length segment.');
       }
