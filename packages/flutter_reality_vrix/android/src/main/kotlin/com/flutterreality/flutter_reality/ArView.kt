@@ -691,7 +691,10 @@ class ArView(
             }
             hasConfidence=true
         } else confidence.fill(0xff.toByte())
-        val intr=frame.camera.textureIntrinsics; val f=intr.focalLength; val c=intr.principalPoint; val d=intr.imageDimensions
+        // Depth and the CPU RGB image are registered to the same camera image
+        // intrinsics. Texture intrinsics can describe a cropped GPU texture and
+        // would shift the RGB-D projection on devices with a different crop.
+        val intr=frame.camera.imageIntrinsics; val f=intr.focalLength; val c=intr.principalPoint; val d=intr.imageDimensions
         val sx=w.toFloat()/d[0]; val sy=h.toFloat()/d[1]; val timestamp=image.timestamp
         val reprojection=raw && lastRawDepthTimestamp==timestamp
         if(raw) lastRawDepthTimestamp=timestamp
