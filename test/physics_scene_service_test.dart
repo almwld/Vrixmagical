@@ -122,6 +122,42 @@ void main() {
       expect(casts.any((hit) => hit.bodyId == 'query-target'), isTrue);
     });
 
+    test('sensor convex proxies query contacts without resolving rigid bodies', () {
+      physics.addKinematicConvexHull(
+        id: 'soft-proxy',
+        worldTransform: Matrix4.identity(),
+        vertices: <Vector3>[
+          Vector3(-0.3, -0.3, -0.3),
+          Vector3(0.3, -0.3, -0.3),
+          Vector3(-0.3, 0.3, -0.3),
+          Vector3(0.3, 0.3, -0.3),
+          Vector3(-0.3, -0.3, 0.3),
+          Vector3(0.3, -0.3, 0.3),
+          Vector3(-0.3, 0.3, 0.3),
+          Vector3(0.3, 0.3, 0.3),
+        ],
+        sensor: true,
+      );
+      physics.addDynamicSphere(
+        id: 'overlapping-rigid',
+        worldTransform: Matrix4.identity()
+          ..setTranslation(Vector3(0.45, 0, 0)),
+        radius: 0.3,
+        mass: 1,
+      );
+
+      physics.advance(1 / 60);
+      final hits = physics.overlapBody('soft-proxy');
+      final hit = hits.firstWhere((value) => value.bodyId == 'overlapping-rigid');
+      expect(hit.normal.x, lessThan(-0.5));
+
+      // A sensor reports the overlap but does not apply Jolt's rigid contact
+      // correction. XPBD is therefore the only solver that responds to it.
+      final rigidPosition =
+          physics.bodyWorldTransform('overlapping-rigid').getTranslation();
+      expect(rigidPosition.x, closeTo(0.45, 0.02));
+    });
+
     test('supports constraints and preserves joint graph during body teleports', () {
       physics.addDynamicBox(
         id: 'joint-a',
