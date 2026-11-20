@@ -73,6 +73,9 @@ jobs:
           dart analyze packages/vrix_soft_body
 
       - name: Unit and widget tests
+        env:
+          # Exercise the same native XPBD ABI in host integration tests.
+          LD_LIBRARY_PATH: /tmp/vrix-soft-body-native
         run: flutter test --reporter expanded
 
       - name: Android debug APK
