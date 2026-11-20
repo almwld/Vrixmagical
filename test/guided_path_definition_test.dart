@@ -31,6 +31,19 @@ void main() {
       expect(result.hasClearance, isTrue);
     });
 
+    test('does not expose mutable references to validated control points', () {
+      final definition = path();
+      final exposedPoints = definition.controlPoints;
+      exposedPoints.first.x = 99;
+
+      final projection = definition.project(
+        Vector3(0, 0, 0.5),
+        movingRadius: 0.05,
+      );
+      expect(projection.closestPoint.x, closeTo(0, 1e-9));
+      expect(projection.progress, closeTo(0.25, 1e-9));
+    });
+
     test('rejects a body that exceeds the local clearance', () {
       final result = path().project(
         Vector3(0.19, 0, 0.5),
