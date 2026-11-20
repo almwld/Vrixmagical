@@ -317,8 +317,10 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       final identity = VrixObject(
         id: node.name,
         source: ObjectSource.library,
-        displayName: ModelArabicLabels.displayName(widget.modelPath?.split('/').last.replaceAll(RegExp(r'\\.(glb|gltf)
-        meshPath: _sampleModel,
+        displayName: widget.modelPath == null
+            ? 'بطة'
+            : ModelArabicLabels.displayName(widget.modelPath!.split('/').last.replaceAll('.glb', '')),
+        meshPath: widget.modelPath ?? _sampleModel,
         physics: const PhysicsProfile(
           mass: 1,
           collider: ColliderShape.box,
@@ -403,8 +405,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
           ),
         );
         _status = physics == null
-            ? 'تم تثبيت المجسم · محرك الفيزياء غير متاح.'
-            : 'تم تثبيت المجسم · تصادم وجاذبية Jolt مفعّلان.';
+            ? 'تم تثبيت ${identity.displayName} · محرك الفيزياء غير متاح.'
+            : 'تم تثبيت ${identity.displayName} · تصادم وجاذبية Jolt مفعّلان.';
       });
     } catch (error) {
       if (dynamicBodyId != null) _physics?.removeBody(dynamicBodyId);
