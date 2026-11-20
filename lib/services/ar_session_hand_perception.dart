@@ -253,7 +253,7 @@ class ArSessionHandPerception {
               .toList(growable: false);
           final handedness = handIndex < result.handedness.length &&
                   result.handedness[handIndex].isNotEmpty
-              ? result.handedness[handIndex].first.categoryName
+              ? (result.handedness[handIndex].first.categoryName ?? 'Unknown')
               : 'Unknown';
           final gesture = _pinchGestures.putIfAbsent(
             handedness,
