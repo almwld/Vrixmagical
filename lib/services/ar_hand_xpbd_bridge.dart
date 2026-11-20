@@ -80,8 +80,11 @@ class ArHandXpbdBridge {
     required ArHandObservation observation,
     required Matrix4 worldFromObject,
   }) {
-    final inverse = Matrix4.copy(worldFromObject);
-    inverse.invert();
+    final determinant = worldFromObject.determinant();
+    if (!determinant.isFinite || determinant.abs() <= 1e-12) {
+      throw ArgumentError('Soft-body world transform must be invertible and finite.');
+    }
+    final inverse = Matrix4.copy(worldFromObject)..invert();
     if (inverse.storage.any((value) => !value.isFinite)) {
       throw ArgumentError('Soft-body world transform must be invertible and finite.');
     }
