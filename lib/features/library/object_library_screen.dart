@@ -31,7 +31,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
     try {
       final selection = await FilePicker.pickFile(
         type: FileType.custom,
-        allowedExtensions: const ['glb', 'gltf'],
+        allowedExtensions: const ['glb'],
       );
       final path = selection?.path;
       if (path == null) return;
@@ -95,7 +95,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
           title: const Text('مكتبة الأصول'),
           actions: [
             IconButton(
-              tooltip: 'استيراد GLB / GLTF',
+              tooltip: 'استيراد GLB',
               onPressed: _importing ? null : _importModel,
               icon: _importing
                   ? const SizedBox(
@@ -157,7 +157,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                       ),
                       SizedBox(height: 7),
                       Text(
-                        'استورد نماذج GLB وGLTF محلياً، واحتفظ بهويتها ووسومها وملفها الفيزيائي في فهرس واحد.',
+                        'استورد نماذج GLB محلياً، واحتفظ بهويتها ووسومها وملفها الفيزيائي في فهرس واحد.',
                         style: TextStyle(
                             color: Color(0xFFB5C5D8),
                             fontSize: 11,
@@ -218,7 +218,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                         ),
                         SizedBox(height: 6),
                         Text(
-                          'اضغط زر الإضافة لاستيراد نموذج GLB أو GLTF. ستُحفظ الملفات محلياً مع بياناتها.',
+                          'اضغط زر الإضافة لاستيراد ملف GLB مستقل بخاماته المضمنة. ستُحفظ الملفات محلياً مع بياناتها.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               color: AppColors.muted,
