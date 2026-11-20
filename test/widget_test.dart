@@ -6,7 +6,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const VirxMagicalApp());
-    await tester.pumpAndSettle();
+    // The home screen contains animated scroll and navigation widgets; do not
+    // wait for the entire tree to become idle.
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('VirxMagical'), findsOneWidget);
     expect(find.text('اصنع واقعك\nبطريقتك.'), findsOneWidget);
