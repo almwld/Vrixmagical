@@ -631,7 +631,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       for (var longitude = 0; longitude < longitudeSegments; longitude++) {
         final a = latitude * row + longitude;
         final b = a + row;
-        indices.addAll([a, b, a + 1, b, b + 1, a + 1]);
+        indices.addAll([a, a + 1, b, b, a + 1, b + 1]);
       }
     }
     return (positions: positions, triangleIndices: indices);
