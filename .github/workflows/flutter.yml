@@ -113,8 +113,11 @@ jobs:
             apk="build/app/outputs/flutter-apk/app-${abi}-release.apk"
             test -s "$apk"
             "$APKSIGNER" verify --verbose "$apk"
-            unzip -Z1 "$apk" | grep -F "lib/$abi/"
-            echo "Verified signed APK for $abi: $(stat -c%s "$apk") bytes"
+            contents="$(unzip -Z1 "$apk")"
+            grep -F "lib/$abi/" <<<"$contents"
+            grep -Ei "^lib/$abi/[^/]*jolt[^/]*\\.so$" <<<"$contents"
+            grep -F "lib/$abi/libvrix_soft_body.so" <<<"$contents"
+            echo "Verified signed APK and native physics libraries for $abi: $(stat -c%s "$apk") bytes"
           done
 
       - name: Upload arm64-v8a APK
