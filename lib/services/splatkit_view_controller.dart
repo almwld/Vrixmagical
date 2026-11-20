@@ -113,14 +113,19 @@ class SplatKitViewController extends ChangeNotifier {
       stats = value;
       notifyListeners();
     } on PlatformException catch (exception) {
-      if (!_disposed) error = exception.message ?? exception.code;
+      if (!_disposed) {
+        error = exception.message ?? exception.code;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> applyQuality(String preset) async {
-    await _invoke('applyQuality', {'preset': preset});
-    quality = preset;
-    notifyListeners();
+    final accepted = await _invoke('applyQuality', {'preset': preset});
+    if (accepted == true) {
+      quality = preset;
+      notifyListeners();
+    }
   }
 
   Future<bool> setMotionEnabled(bool enabled) async {
