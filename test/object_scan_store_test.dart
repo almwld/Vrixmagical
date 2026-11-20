@@ -145,6 +145,13 @@ void main() {
 
       await expectLater(store.complete(), throwsA(isA<FileSystemException>()));
       expect(store.snapshot.isComplete, isFalse);
+
+      // Remove the injected filesystem fault before verifying that the
+      // rolled-back session can accept another view and commit its manifest.
+      await Directory(
+        '${store.directory.path}/scan_manifest.json.tmp',
+      ).delete();
+
       await expectLater(store.addView(view(.8)), completes);
     });
 
