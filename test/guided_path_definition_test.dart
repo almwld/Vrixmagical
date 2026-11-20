@@ -73,6 +73,12 @@ void main() {
       );
       expect(forward.phase, GuidedPathPhase.inside);
       expect(reverse.phase, GuidedPathPhase.disallowedDirection);
+      final outside = oneWay.project(
+        Vector3(1, 0, 0.5),
+        movingRadius: 0.05,
+        travelDirection: -1,
+      );
+      expect(outside.phase, GuidedPathPhase.outside);
     });
 
     test('rejects degenerate segments and invalid clearances', () {
