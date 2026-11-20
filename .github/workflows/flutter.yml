@@ -104,14 +104,42 @@ jobs:
       - name: Android split release APKs
         run: flutter build apk --release --split-per-abi
 
-      - name: Verify split APK outputs and native libraries
+      - name: Verify split APK outputs, signatures and native libraries
+        shell: bash
         run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          ARM64_APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-          test -s "$ARM64_APK"
-          unzip -Z1 "$ARM64_APK" | tee /tmp/split-arm64-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/split-arm64-files.txt
-          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/split-arm64-files.txt
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            apk="build/app/outputs/flutter-apk/app-${abi}-release.apk"
+            test -s "$apk"
+            "$APKSIGNER" verify --verbose "$apk"
+            unzip -Z1 "$apk" | grep -F "lib/$abi/"
+            echo "Verified signed APK for $abi: $(stat -c%s "$apk") bytes"
+          done
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-arm64-v8a
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-armeabi-v7a
+          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-x86_64
+          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Android release App Bundle
         run: flutter build appbundle --release
@@ -122,13 +150,18 @@ jobs:
           grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
           grep -F 'base/lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-aab-files.txt
 
-      - name: Upload release artifacts
+      - name: Upload universal release APK
         uses: actions/upload-artifact@v4
         with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
+          name: virxmagical-universal-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Upload Android App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
