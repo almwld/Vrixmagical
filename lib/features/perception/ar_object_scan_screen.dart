@@ -660,14 +660,50 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     }));
   }
 
+  void _uploadProbeMeshFrame() {
+    final objectManager = _objects;
+    final physics = _physicsScene;
+    final bodyId = _probeBodyId;
+    final meshId = _probeMeshId;
+    final positions = _probeMeshPositions;
+    if (objectManager == null || physics == null || bodyId == null ||
+        meshId == null || positions == null ||
+        _probeUploadInFlight || _probeUploadFaultReported ||
+        physics.isDisposed) {
+      return;
+    }
+    _probeUploadInFlight = true;
+    final transform = physics.bodyWorldTransform(bodyId);
+    unawaited(objectManager.updateDeformableMesh(
+      id: meshId,
+      positions: positions,
+      worldTransform: transform,
+    ).catchError((Object error) {
+      if (_probeUploadFaultReported) return;
+      _probeUploadFaultReported = true;
+      if (mounted) {
+        setState(() => _error = 'تعذّر تحديث مجسم اختبار Jolt داخل AR: $error');
+      }
+    }).whenComplete(() {
+      _probeUploadInFlight = false;
+    }));
+  }
+
   Future<void> _removeDeformableMesh() async {
-    final meshId = _deformableMeshId;
+    final ids = <String>[
+      if (_deformableMeshId != null) _deformableMeshId!,
+      if (_probeMeshId != null) _probeMeshId!,
+    ];
     _deformableMeshId = null;
-    if (meshId == null) return;
-    try {
-      await _objects?.removeDeformableMesh(meshId);
-    } catch (_) {
-      // The native AR view may already be tearing down.
+    _probeBodyId = null;
+    _probeMeshId = null;
+    _probeMeshPositions = null;
+    for (final id in ids) {
+      try {
+        await _objects?.removeDeformableMesh(id);
+      } catch (_) {
+        // The native AR view may already be tearing down.
+      }
     }
   }
 
