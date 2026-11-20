@@ -572,16 +572,18 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
 
   Future<void> _startHandXpbdInteraction() async {
     final session = _session;
-    final engine = _softBodyEngine;
-    final body = _softBodyHandle;
+    final runtime = _softBodyRuntime;
     final worldFromObject = _softBodyWorldTransform;
-    if (_busy || session == null || engine == null || body == null ||
+    if (_busy || session == null || runtime == null ||
         worldFromObject == null || _handInteractionEnabled) {
       return;
     }
 
     final bridge = ArHandXpbdBridge(
-      driver: NativeXpbdPointTargetDriver(engine: engine, body: body),
+      driver: NativeXpbdPointTargetDriver(
+        engine: runtime.engine,
+        body: runtime.softBody,
+      ),
       compliance: 0.0001,
       maximumTargetDistanceMeters: 0.14,
     );
@@ -642,15 +644,14 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
 
   Future<void> _exportDeformedGlb() async {
     final reconstruction = _reconstruction;
-    final engine = _softBodyEngine;
-    final body = _softBodyHandle;
-    if (_busy || reconstruction == null || engine == null || body == null) return;
+    final runtime = _softBodyRuntime;
+    if (_busy || reconstruction == null || runtime == null) return;
     setState(() {
       _busy = true;
       _status = 'جارٍ قراءة حالة XPBD وتصدير السطح المتشوه إلى GLB…';
     });
     try {
-      final state = engine.readState(body);
+      final state = runtime.engine.readState(runtime.softBody);
       final vertices = List<Vector3>.generate(
         state.positions.length ~/ 3,
         (index) => Vector3(
@@ -704,7 +705,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final session = _session;
     final perception = _handPerception;
     final bridge = _handXpbdBridge;
-    final softBodyEngine = _softBodyEngine;
+    final runtime = _softBodyRuntime;
+    final physics = _physicsScene;
+    _softBodyRuntime = null;
+    _physicsScene = null;
     _handInteractionEnabled = false;
     _softBodyTicker?.cancel();
     unawaited(() async {
@@ -712,9 +716,9 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       bridge?.clear();
       await _removeDeformableMesh();
       await session?.dispose();
-      softBodyEngine?.dispose();
+      runtime?.dispose();
+      physics?.dispose();
     }());
-    _physicsScene?.dispose();
     super.dispose();
   }
 
@@ -816,7 +820,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       icon: const Icon(Icons.view_in_ar_rounded),
                       label: const Text('إعادة بناء Mesh وتصدير GLB وCollider'),
                     ),
-                  if (_reconstruction != null && _softBodyEngine != null && _softBodyHandle != null)
+                  if (_reconstruction != null && _softBodyRuntime != null)
                     FilledButton.icon(
                       onPressed: _busy
                           ? null
@@ -824,7 +828,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       icon: Icon(_handInteractionEnabled ? Icons.front_hand_rounded : Icons.touch_app_rounded),
                       label: Text(_handInteractionEnabled ? 'إيقاف تفاعل اليد مع XPBD' : 'تشغيل تفاعل اليد مع XPBD'),
                     ),
-                  if (_reconstruction != null && _softBodyEngine != null && _softBodyHandle != null)
+                  if (_reconstruction != null && _softBodyRuntime != null)
                     OutlinedButton.icon(
                       onPressed: _busy ? null : _exportDeformedGlb,
                       icon: const Icon(Icons.file_download_outlined),
