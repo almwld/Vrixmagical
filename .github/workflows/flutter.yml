@@ -115,7 +115,7 @@ jobs:
             "$APKSIGNER" verify --verbose "$apk"
             contents="$(unzip -Z1 "$apk")"
             grep -F "lib/$abi/" <<<"$contents"
-            grep -Ei "^lib/$abi/[^/]*jolt[^/]*\\.so$" <<<"$contents"
+            grep -Ei "^lib/$abi/[^/]*jolt[^/]*\.so$" <<<"$contents"
             grep -F "lib/$abi/libvrix_soft_body.so" <<<"$contents"
             echo "Verified signed APK and native physics libraries for $abi: $(stat -c%s "$apk") bytes"
           done
