@@ -128,6 +128,26 @@ void main() {
       await expectLater(store.addView(view(.8)), throwsStateError);
     });
 
+    test('rolls back in-memory completion when manifest commit fails', () async {
+      final store = await ObjectScanStore.create(
+        displayName: 'Desk scan',
+        rootDirectory: root,
+      );
+      await store.addView(view(.2));
+      await store.addView(view(.5));
+      await store.addView(view(.7));
+
+      // Force the temporary manifest write to fail without damaging the
+      // previously committed collecting manifest.
+      await Directory(
+        '${store.directory.path}/scan_manifest.json.tmp',
+      ).create();
+
+      await expectLater(store.complete(), throwsA(isA<FileSystemException>()));
+      expect(store.snapshot.isComplete, isFalse);
+      await expectLater(store.addView(view(.8)), completes);
+    });
+
     test('rejects invalid camera poses and prompt coordinates', () async {
       final store = await ObjectScanStore.create(
         displayName: 'Lamp',
