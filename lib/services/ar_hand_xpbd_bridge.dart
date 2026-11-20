@@ -1,6 +1,6 @@
 import 'package:vector_math/vector_math_64.dart';
 
-import '../domain/soft_body_contract.dart';
+import 'package:vrix_soft_body/vrix_soft_body.dart';
 import 'ar_session_hand_perception.dart';
 
 /// Small adapter over the native XPBD point-target API. Keeping this seam
