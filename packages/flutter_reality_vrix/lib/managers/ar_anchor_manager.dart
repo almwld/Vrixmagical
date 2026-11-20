@@ -1,5 +1,6 @@
 import 'package:flutter_reality/models/ar_anchor.dart';
 import 'package:flutter_reality/src/generated/messages.g.dart';
+import 'pending_anchor_upload_queue.dart';
 
 // Type definitions to enforce a consistent use of the API
 /// Signature for [ARAnchorManager.onAnchorUploaded]: receives the anchor
@@ -25,6 +26,8 @@ class ARAnchorManager {
 
   /// Reference to all anchors that are being uploaded to the google cloud anchor API
   List<ARAnchor> pendingAnchors = [];
+  late final PendingAnchorUploadQueue<ARAnchor> _pendingUploads =
+      PendingAnchorUploadQueue<ARAnchor>(pendingAnchors);
 
   /// Callback that is triggered once an anchor has successfully been uploaded to the google cloud anchor API
   AnchorUploadedHandler? onAnchorUploaded;
@@ -60,32 +63,58 @@ class ARAnchorManager {
     try {
       return await _hostApi.addAnchor(_toAnchorMessage(anchor));
     } catch (e) {
-      print('Error caught: ' + e.toString());
+      onError?.call('Unable to add AR anchor: $e');
       return false;
     }
   }
 
   /// Remove given anchor and all its children from the AR Scene
-  Future<void> removeAnchor(ARAnchor anchor) {
-    return _hostApi.removeAnchor(anchor.name);
+  Future<void> removeAnchor(ARAnchor anchor) async {
+    _pendingUploads.remove(
+      anchor.name,
+      nameOf: (pending) => pending.name,
+    );
+    await _hostApi.removeAnchor(anchor.name);
   }
 
   /// Upload given anchor from the underlying AR scene to the Google Cloud Anchor API
   Future<bool?> uploadAnchor(ARAnchor anchor) async {
+    // Register before awaiting the host call: its completion callback can race
+    // ahead of the returned Future on a fast native upload.
+    if (!_pendingUploads.add(
+      anchor,
+      nameOf: (pending) => pending.name,
+    )) {
+      onError?.call('An upload is already pending for anchor ${anchor.name}.');
+      return false;
+    }
     try {
       final response = await _hostApi.uploadAnchor(anchor.name);
-      pendingAnchors.add(anchor);
+      if (response != true) {
+        _pendingUploads.remove(
+          anchor.name,
+          nameOf: (pending) => pending.name,
+        );
+      }
       return response;
     } catch (e) {
-      print('Error caught: ' + e.toString());
+      _pendingUploads.remove(
+        anchor.name,
+        nameOf: (pending) => pending.name,
+      );
+      onError?.call('Unable to upload AR anchor: $e');
       return false;
     }
   }
 
-  /// Try to download anchor with the given ID from the Google Cloud Anchor API and add it to the scene
+  /// Try to download anchor with the given ID from the Google Cloud Anchor API and add it to the scene.
   Future<bool?> downloadAnchor(String cloudanchorid) async {
-    print('TRYING TO DOWNLOAD ANCHOR WITH ID $cloudanchorid');
-    return await _hostApi.downloadAnchor(cloudanchorid);
+    try {
+      return await _hostApi.downloadAnchor(cloudanchorid);
+    } catch (e) {
+      onError?.call('Unable to download cloud anchor: $e');
+      return false;
+    }
   }
 
   AnchorMessage _toAnchorMessage(ARAnchor anchor) {
@@ -113,20 +142,36 @@ class _AnchorEventHandler implements ARAnchorFlutterApi {
 
   @override
   void onError(String message) {
-    print(message);
+    if (_manager.debug) print(message);
     _manager.onError?.call(message);
   }
 
   @override
   void onCloudAnchorUploaded(CloudAnchorUploadedMessage event) {
-    print(
-        'UPLOADED ANCHOR WITH ID: ${event.cloudAnchorId}, NAME: ${event.name}');
-    final currentAnchor = _manager.pendingAnchors
-        .where((element) => element.name == event.name)
-        .first;
-    (currentAnchor as ARPlaneAnchor).cloudanchorid = event.cloudAnchorId;
-    _manager.pendingAnchors.remove(currentAnchor);
-    _manager.onAnchorUploaded?.call(currentAnchor);
+    final currentAnchor = _manager._pendingUploads.take(
+      event.name,
+      nameOf: (element) => element.name,
+    );
+    // A late callback after removal, cancellation or a duplicate delivery is
+    // harmless; never crash the AR session with List.first on an empty queue.
+    if (currentAnchor == null) {
+      if (_manager.debug) {
+        print('Ignoring stale cloud-anchor completion for ${event.name}.');
+      }
+      return;
+    }
+    if (currentAnchor is! ARPlaneAnchor) {
+      _manager.onError?.call(
+        'Cloud-anchor upload completed for a non-plane anchor: ${event.name}.',
+      );
+      return;
+    }
+    currentAnchor.cloudanchorid = event.cloudAnchorId;
+    try {
+      _manager.onAnchorUploaded?.call(currentAnchor);
+    } catch (error) {
+      _manager.onError?.call('Cloud-anchor upload callback failed: $error');
+    }
   }
 
   @override
@@ -139,10 +184,13 @@ class _AnchorEventHandler implements ARAnchorFlutterApi {
       'cloudanchorid': anchor.cloudAnchorId,
       'ttl': anchor.ttl,
     };
-    if (_manager.onAnchorDownloaded != null) {
-      final downloaded = _manager.onAnchorDownloaded!(serializedAnchor);
-      return downloaded.name;
+    final callback = _manager.onAnchorDownloaded;
+    if (callback == null) return anchor.name;
+    try {
+      return callback(serializedAnchor).name;
+    } catch (error) {
+      _manager.onError?.call('Cloud-anchor download callback failed: $error');
+      return anchor.name;
     }
-    return anchor.name;
   }
 }
