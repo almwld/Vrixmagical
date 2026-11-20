@@ -17,6 +17,8 @@ The vendored package `packages/flutter_reality_vrix` configures `RAW_DEPTH_ONLY`
 
 The legacy plugin `getCameraPose()` still exists for compatibility, but the scanner no longer calls it. The new MethodChannel request is fulfilled on a later rendered frame and does not call `session.update()` again.
 
+Depth-image intrinsics are now derived from the same ARCore `imageIntrinsics` used by the CPU RGB capture, then scaled to the depth image dimensions. This avoids mixing GPU texture-crop calibration with the CPU RGB-D pair.
+
 ## Reconstruction and simulation status
 
 The source now implements a bounded RGB-D reconstruction path: it reloads persisted synchronized frames, aligns depth and masks, projects masked points, fuses them into voxels, creates a voxel-derived surface, exports GLB 2.0, and bakes a static Jolt triangle-mesh collider. A structured tetrahedral volume is also generated from the fused occupancy and returned as `SoftBodyMeshData`.
