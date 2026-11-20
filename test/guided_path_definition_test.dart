@@ -54,6 +54,27 @@ void main() {
       expect(exit.phase, GuidedPathPhase.exit);
     });
 
+    test('enforces authored one-way traversal without affecting bidirectional paths', () {
+      final oneWay = GuidedPathDefinition(
+        id: 'one-way',
+        controlPoints: [Vector3.zero(), Vector3(0, 0, 1)],
+        clearanceRadii: const [0.2, 0.2],
+        permittedDirection: GuidedPathDirection.forward,
+      );
+      final forward = oneWay.project(
+        Vector3(0, 0, 0.5),
+        movingRadius: 0.05,
+        travelDirection: 1,
+      );
+      final reverse = oneWay.project(
+        Vector3(0, 0, 0.5),
+        movingRadius: 0.05,
+        travelDirection: -1,
+      );
+      expect(forward.phase, GuidedPathPhase.inside);
+      expect(reverse.phase, GuidedPathPhase.disallowedDirection);
+    });
+
     test('rejects degenerate segments and invalid clearances', () {
       expect(
         () => GuidedPathDefinition(
