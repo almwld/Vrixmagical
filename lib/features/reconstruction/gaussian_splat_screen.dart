@@ -361,7 +361,7 @@ class _GaussianSplatScreenState extends State<GaussianSplatScreen> {
                   ),
                   OutlinedButton.icon(
                     onPressed: _importCollider,
-                    icon: const Icon(Icons.collision_rounded, size: 16),
+                    icon: const Icon(Icons.layers_outlined, size: 16),
                     label: const Text('تحميل Collider GLB'),
                   ),
                 ],
