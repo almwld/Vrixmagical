@@ -391,7 +391,9 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final physics = PhysicsSceneService();
     VrixSoftBodySceneRuntime? candidateRuntime;
     String? pendingMeshId;
+    String? pendingProbeMeshId;
     var pendingMeshAdded = false;
+    var pendingProbeMeshAdded = false;
     try {
       final result = await const ObjectScanReconstructionService()
           .reconstruct(store.snapshot);
@@ -408,7 +410,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         worldTransform: worldTransform,
       );
       final initialFrame = candidateRuntime.advance(1 / 60);
-      _spawnCouplingProbe(
+      final probe = _spawnCouplingProbe(
         physics: physics,
         runtime: candidateRuntime,
         scanId: store.id,
@@ -432,9 +434,27 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       }
       pendingMeshAdded = true;
 
-      // Commit the new runtime only after its Jolt proxy, XPBD body, contact
-      // probe and live Filament mesh have all been created successfully.
+      final newProbeMeshId =
+          'contact-probe-${store.id}-${DateTime.now().microsecondsSinceEpoch}';
+      pendingProbeMeshId = newProbeMeshId;
+      final probeAddedToAr = await objectManager.addDeformableMesh(
+        id: newProbeMeshId,
+        positions: probe.positions,
+        triangleIndices: probe.triangleIndices,
+        worldTransform: probe.worldTransform,
+        color: 0xFFFFA726,
+        metallic: 0.05,
+        roughness: 0.48,
+      );
+      if (!probeAddedToAr) {
+        throw StateError('Filament refused to create the visible Jolt contact probe.');
+      }
+      pendingProbeMeshAdded = true;
+
+      // Commit only after the Jolt proxy, XPBD body, soft surface and visible
+      // rigid-body probe have all been created successfully.
       final previousMeshId = _deformableMeshId;
+      final previousProbeMeshId = _probeMeshId;
       final previousRuntime = _softBodyRuntime;
       final previousPhysics = _physicsScene;
       _softBodyTicker?.cancel();
@@ -447,15 +467,22 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       _deformableMeshId = pendingMeshId;
       pendingMeshId = null;
       pendingMeshAdded = false;
+      _probeBodyId = probe.bodyId;
+      _probeMeshId = pendingProbeMeshId;
+      pendingProbeMeshId = null;
+      pendingProbeMeshAdded = false;
+      _probeMeshPositions = probe.positions;
       _meshUploadFaultReported = false;
+      _probeUploadFaultReported = false;
       _softBodyFrame = initialFrame;
       _softBodySteps = _softBodyRuntime!.coupledSteps;
 
-      if (previousMeshId != null) {
+      for (final previousId in [previousMeshId, previousProbeMeshId]) {
+        if (previousId == null) continue;
         try {
-          await objectManager.removeDeformableMesh(previousMeshId);
+          await objectManager.removeDeformableMesh(previousId);
         } catch (_) {
-          // Keep the new renderable alive even if the old one is already detached.
+          // Keep the new renderables alive if an old node is already detached.
         }
       }
       previousRuntime?.dispose();
@@ -477,6 +504,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
           if (frame.frameNumber % 4 == 0) {
             _softBodyFrame = frame;
             _uploadDeformableMeshFrame(frame.positions);
+            _uploadProbeMeshFrame();
             if (mounted) setState(() {});
           }
         } catch (error) {
@@ -499,9 +527,13 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         });
       }
     } catch (error) {
-      if (pendingMeshAdded && pendingMeshId != null) {
+      for (final pendingId in [
+        if (pendingMeshAdded) pendingMeshId,
+        if (pendingProbeMeshAdded) pendingProbeMeshId,
+      ]) {
+        if (pendingId == null) continue;
         try {
-          await _objects?.removeDeformableMesh(pendingMeshId);
+          await _objects?.removeDeformableMesh(pendingId);
         } catch (_) {}
       }
       candidateRuntime?.dispose();
