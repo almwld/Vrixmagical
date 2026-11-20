@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/app_theme.dart';
 import '../../services/splatkit_view_controller.dart';
+import '../../services/splat_tiled_world_importer.dart';
 
 class GaussianSplatScreen extends StatefulWidget {
   const GaussianSplatScreen({super.key});
@@ -57,6 +58,44 @@ class _GaussianSplatScreenState extends State<GaussianSplatScreen> {
 
   Future<void> _setQuality(String value) async {
     await _controller?.applyQuality(value);
+  }
+
+  Future<void> _importTiledWorld() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = 'اختر مجلد العالم المقسّم…';
+    });
+    try {
+      final selectedDirectory = await FilePicker.getDirectoryPath(
+        dialogTitle: 'اختر مجلد Gaussian Splat Tileset',
+      );
+      if (selectedDirectory == null) return;
+      final documents = await getApplicationDocumentsDirectory();
+      final imported = await const SplatTiledWorldImporter().copyDirectory(
+        source: Directory(selectedDirectory),
+        destinationRoot: documents,
+        onProgress: (copied, total) {
+          if (mounted && copied % 20 == 0) {
+            setState(() => _status = 'نسخ ملفات العالم: $copied / $total');
+          }
+        },
+      );
+      _controller?.removeListener(_onControllerChanged);
+      _controller?.dispose();
+      _controller = null;
+      setState(() {
+        _worldPath = imported.tilesetFile.path;
+        _worldName = 'Tiled Gaussian World';
+        _status = 'تم نسخ ${imported.fileCount} ملفاً؛ جارٍ تحميل Tileset.';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _status = 'تعذّر استيراد Tileset: ' + error.toString());
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _importWorld() async {
@@ -291,6 +330,16 @@ class _GaussianSplatScreenState extends State<GaussianSplatScreen> {
                         fontSize: 9,
                       ),
                     ),
+                  if (_controller!.capabilities.isNotEmpty)
+                    Text(
+                      'Vulkan · Subgroups: ${_controller!.capabilities['supportsSubgroups'] == true ? 'ON' : 'OFF'}'
+                      ' · Hi-Z: ${_controller!.capabilities['supportsHiZOcclusion'] == true ? 'supported' : 'fallback'}'
+                      ' · Max texture: ${_controller!.capabilities['maxTextureDimension'] ?? '—'}',
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 9,
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -324,6 +373,37 @@ class _GaussianSplatScreenState extends State<GaussianSplatScreen> {
                       ),
                     ],
                   ),
+                  Row(
+                    children: [
+                      const Text(
+                        'Hi-Z occlusion',
+                        style: TextStyle(fontSize: 10, color: AppColors.muted),
+                      ),
+                      Switch.adaptive(
+                        value: _controller!.hiZOcclusionEnabled,
+                        onChanged: _controller!.capabilities['supportsHiZOcclusion'] == true
+                            ? (value) => _controller!.setHiZOcclusion(value)
+                            : null,
+                      ),
+                      const Spacer(),
+                      if (_controller!.renderPolicyAccepted != null)
+                        Text(
+                          _controller!.renderPolicyAccepted! ? 'Policy accepted' : 'Fallback',
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 9,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (_controller!.renderPolicyWarnings.isNotEmpty)
+                    Text(
+                      _controller!.renderPolicyWarnings.join(' · '),
+                      style: const TextStyle(
+                        color: Color(0xFFFFCC80),
+                        fontSize: 9,
+                      ),
+                    ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -368,14 +448,28 @@ class _GaussianSplatScreenState extends State<GaussianSplatScreen> {
                 const SizedBox(height: 14),
                 SizedBox(
                   height: 51,
-                  child: FilledButton.icon(
-                    onPressed: _busy ? null : _importWorld,
-                    icon: Icon(
-                      _busy ? Icons.hourglass_top_rounded : Icons.folder_open_rounded,
-                    ),
-                    label: Text(
-                      _busy ? 'جارٍ تجهيز الملف…' : 'استيراد مشهد ثلاثي الأبعاد',
-                    ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _busy ? null : _importWorld,
+                          icon: Icon(
+                            _busy ? Icons.hourglass_top_rounded : Icons.file_open_rounded,
+                          ),
+                          label: Text(
+                            _busy ? 'جارٍ تجهيز الملف…' : 'SPZ / LODSPLAT',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy ? null : _importTiledWorld,
+                          icon: const Icon(Icons.folder_open_rounded),
+                          label: const Text('Tiled World'),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
