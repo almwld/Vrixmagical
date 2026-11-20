@@ -379,33 +379,34 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         // Restore the original AR world-space center when registering the Jolt proxy.
         final worldTransform = Matrix4.identity()
           ..setTranslation(result.tetrahedralization.worldOrigin);
-        runtime = VrixSoftBodySceneRuntime.fromReconstruction(
+        final activeRuntime = VrixSoftBodySceneRuntime.fromReconstruction(
           reconstruction: result,
           scene: physics,
           objectId: store.id,
           worldTransform: worldTransform,
         );
-        final initialFrame = runtime.advance(1 / 60);
+        runtime = activeRuntime;
+        final initialFrame = activeRuntime.advance(1 / 60);
 
         _softBodyTicker?.cancel();
         _softBodyRuntime?.dispose();
         _physicsScene?.dispose();
-        _softBodyRuntime = runtime;
+        _softBodyRuntime = activeRuntime;
         _physicsScene = physics;
         _softBodyFrame = initialFrame;
-        _softBodySteps = runtime.coupledSteps;
+        _softBodySteps = activeRuntime.coupledSteps;
 
         final clock = Stopwatch()..start();
         var previousMicros = clock.elapsedMicroseconds;
         _softBodyTicker = Timer.periodic(const Duration(milliseconds: 16), (_) {
-          if (!mounted || runtime!.isDisposed) return;
+          if (!mounted || activeRuntime.isDisposed) return;
           final now = clock.elapsedMicroseconds;
           final deltaSeconds =
               ((now - previousMicros) / 1000000).clamp(0.0, 0.05).toDouble();
           previousMicros = now;
           try {
-            final frame = runtime!.advance(deltaSeconds);
-            _softBodySteps = runtime!.coupledSteps;
+            final frame = activeRuntime.advance(deltaSeconds);
+            _softBodySteps = activeRuntime.coupledSteps;
             // Keep the solver at the frame cadence but limit Flutter mesh-preview
             // uploads to approximately 15 Hz on mobile hardware.
             if (_softBodySteps % 4 == 0 && mounted) {
