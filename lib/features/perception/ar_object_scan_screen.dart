@@ -413,10 +413,11 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       if (objectManager == null) {
         throw StateError('AR object renderer is not ready for deformable mesh upload.');
       }
-      pendingMeshId =
+      final newMeshId =
           'soft-body-${store.id}-${DateTime.now().microsecondsSinceEpoch}';
+      pendingMeshId = newMeshId;
       final addedToAr = await objectManager.addDeformableMesh(
-        id: pendingMeshId,
+        id: newMeshId,
         positions: initialFrame.positions,
         triangleIndices: initialFrame.surfaceTriangleIndices,
         worldTransform: initialFrame.worldTransform,
