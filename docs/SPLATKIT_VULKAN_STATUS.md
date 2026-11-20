@@ -19,15 +19,14 @@
 - `worldReady` means decoded/uploaded; it is **not** proof that Vulkan completed a frame.
 - `worldFrameReady` means the GPU completed the first frame; it does not guarantee display scanout.
 - A Gaussian Splat world is visual geometry. It is not automatically a Jolt collider. Load a prepared GLB collider explicitly.
-- Tiled-world loading is available through the controller API; a complete directory-aware picker/copy workflow remains pending.
+- Tiled-world import is available through the directory picker; the complete source folder is copied into app-private storage with relative paths preserved.
 - A false `isAvailable` immediately after PlatformView creation can mean Vulkan is still initializing. Wait for first-frame or explicit GPU-failure events.
 
 ## Remaining acceptance gates
 
-1. Run the Android build against the exact Maven beta.3 artifact and verify every bridge symbol exists in that artifact.
-2. Verify packaged SplatKit native libraries and 16 KB page/ZIP alignment for every shipped ABI.
-3. Exercise SPZ and LODSPLAT imports, collider loading, pause/resume, repeated view creation/disposal and GPU/world failure paths.
-4. Add a directory-aware tiled-world import workflow and surface device capability/policy fallbacks in the UI.
-5. Test on a physical Vulkan 1.1 device (including the target LG V60 where supported): first frame, sustained FPS/GPU time, memory, thermal throttling, background/resume and long-session stability.
+1. Exact Maven beta.3 bridge compilation and method availability passed in CI run #294.
+2. SplatKit native-library presence and 16 KiB ELF alignment passed for debug/release/split APKs and the release AAB in run #294.
+3. Exercise SPZ/LODSPLAT and tiled-world streaming, collider loading, Hi-Z policy acceptance/fallback, pause/resume, repeated view creation/disposal and GPU/world failure paths on a physical device.
+4. Test on a physical Vulkan 1.1 device (including the target LG V60 where supported): first frame, sustained FPS/GPU time, memory, thermal throttling, background/resume and long-session stability.
 
 CI compilation and emulator success do not establish Vulkan presentation or physical-device performance.
