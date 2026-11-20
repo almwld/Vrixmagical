@@ -609,9 +609,9 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       ),
                     ),
                   Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 20,
+                    left: 24,
+                    right: 24,
+                    top: 76,
                     child: FilledButton.icon(
                       onPressed: _probeBodyId == null ? _spawnCouplingProbe : null,
                       icon: const Icon(Icons.sports_mma_rounded),
