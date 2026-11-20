@@ -90,6 +90,10 @@ void main() {
         expect(frame.triangleCount, tetrahedralization.mesh.triangleCount);
         expect(runtime.coupledSteps, greaterThan(0));
         expect(firstFrameContactCount, greaterThan(0));
+        // Contact presence alone is not proof of two-way coupling: require
+        // XPBD's measured reaction to be emitted as a point impulse to Jolt.
+        expect(runtime.lastAppliedReactionCount, greaterThan(0));
+        expect(runtime.lastAppliedReactionImpulse.length2, greaterThan(1e-12));
         expect(physics.isDynamicBody('runtime-probe'), isTrue);
         expect(physics.isDynamicBody('soft:runtime-test'), isFalse);
       } finally {
