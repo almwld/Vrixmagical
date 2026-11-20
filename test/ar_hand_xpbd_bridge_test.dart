@@ -108,6 +108,22 @@ void main() {
     expect(driver.cleared, contains(0));
   });
 
+  test('rejects a singular object transform before mapping hand coordinates', () {
+    final driver = _FakeXpbdDriver([0, 0, 0]);
+    final bridge = ArHandXpbdBridge(driver: driver);
+
+    expect(
+      () => bridge.update(
+        observation: _observation(
+          pinching: true,
+          indexTip: Vector3.zero(),
+        ),
+        worldFromObject: Matrix4.diagonal3Values(0, 1, 1),
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('invalid hand coordinates clear the previous native target', () {
     final driver = _FakeXpbdDriver([
       0, 0, 0,
