@@ -108,6 +108,38 @@ void main() {
     expect(driver.cleared, contains(0));
   });
 
+  test('invalid hand coordinates clear the previous native target', () {
+    final driver = _FakeXpbdDriver([
+      0, 0, 0,
+      1, 0, 0,
+      0, 1, 0,
+      0, 0, 1,
+    ]);
+    final bridge = ArHandXpbdBridge(driver: driver);
+    final transform = Matrix4.identity();
+
+    bridge.update(
+      observation: _observation(
+        pinching: true,
+        indexTip: Vector3(0.01, 0.01, 0),
+      ),
+      worldFromObject: transform,
+    );
+    expect(driver.targets, contains(0));
+
+    bridge.update(
+      observation: _observation(
+        pinching: true,
+        indexTip: Vector3(double.nan, 0.01, 0),
+      ),
+      worldFromObject: transform,
+    );
+
+    expect(bridge.activeTargets, isEmpty);
+    expect(driver.targets, isEmpty);
+    expect(driver.cleared, contains(0));
+  });
+
   test('tracking loss clears targets and distant hands cannot grab the mesh', () {
     final driver = _FakeXpbdDriver([
       0, 0, 0,
