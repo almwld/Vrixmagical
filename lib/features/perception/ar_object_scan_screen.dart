@@ -35,6 +35,10 @@ class ArObjectScanScreen extends StatefulWidget {
 
 class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   ARSessionManager? _session;
+  ARObjectManager? _objects;
+  String? _deformableMeshId;
+  bool _meshUploadInFlight = false;
+  bool _meshUploadFaultReported = false;
   InteractiveSegmenter? _segmenter;
   ObjectScanStore? _store;
   String? _photoPath;
@@ -80,6 +84,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     ARLocationManager locations,
   ) {
     _session = session;
+    _objects = objects;
     session.onError = (message) {
       if (mounted) setState(() => _error = message);
     };
@@ -402,7 +407,32 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         if (initialState.positions.length != result.tetrahedralization.vertexCount * 3) {
           throw StateError('XPBD returned a state with an unexpected vertex count.');
         }
-        softBodyStatus = 'XPBD يعمل؛ العرض المرئي للتشوه وربط التلامس مع Jolt ما زالا منفصلين.';
+        final objectManager = _objects;
+        if (objectManager == null) {
+          throw StateError('AR object renderer is not ready for deformable mesh upload.');
+        }
+        final meshId = 'soft-body-${store.id}';
+        final previousMeshId = _deformableMeshId;
+        if (previousMeshId != null) {
+          await objectManager.removeDeformableMesh(previousMeshId);
+          _deformableMeshId = null;
+        }
+        final addedToAr = await objectManager.addDeformableMesh(
+          id: meshId,
+          positions: initialState.positions,
+          triangleIndices: result.tetrahedralization.mesh.surfaceTriangleIndices,
+          worldTransform: Matrix4.translationValues(
+            result.tetrahedralization.originWorldMeters.x,
+            result.tetrahedralization.originWorldMeters.y,
+            result.tetrahedralization.originWorldMeters.z,
+          ),
+        );
+        if (!addedToAr) {
+          throw StateError('Filament refused to create the deformable AR surface.');
+        }
+        _deformableMeshId = meshId;
+        _meshUploadFaultReported = false;
+        softBodyStatus = 'XPBD متصل بسطح Filament داخل جلسة AR؛ ربط التصادم مع Jolt ما زال قيد الإكمال.';
       } catch (error) {
         softBodyEngine?.dispose();
         softBodyEngine = null;
@@ -427,11 +457,12 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
           try {
             activeSoftBodyEngine.step(1 / 60);
             _softBodySteps++;
-            if (_softBodySteps % 15 == 0) {
+            if (_softBodySteps % 4 == 0) {
               final state = activeSoftBodyEngine.readState(activeSoftBodyHandle);
               if (state.positions.length != result.tetrahedralization.vertexCount * 3) {
                 throw StateError('XPBD state vertex count changed unexpectedly.');
               }
+              _uploadDeformableMeshFrame(state.positions);
               if (mounted) setState(() {});
             }
           } catch (error) {
@@ -453,6 +484,40 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       });
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _uploadDeformableMeshFrame(List<double> positions) {
+    final objectManager = _objects;
+    final meshId = _deformableMeshId;
+    final worldTransform = _softBodyWorldTransform;
+    if (objectManager == null || meshId == null || worldTransform == null ||
+        _meshUploadInFlight || _meshUploadFaultReported) {
+      return;
+    }
+    _meshUploadInFlight = true;
+    unawaited(objectManager.updateDeformableMesh(
+      id: meshId,
+      positions: positions,
+      worldTransform: worldTransform,
+    ).catchError((Object error) {
+      if (_meshUploadFaultReported) return;
+      _meshUploadFaultReported = true;
+      if (mounted) setState(() =>
+          _error = 'تعذّر تحديث سطح XPBD داخل AR: $error');
+    }).whenComplete(() {
+      _meshUploadInFlight = false;
+    }));
+  }
+
+  Future<void> _removeDeformableMesh() async {
+    final meshId = _deformableMeshId;
+    _deformableMeshId = null;
+    if (meshId == null) return;
+    try {
+      await _objects?.removeDeformableMesh(meshId);
+    } catch (_) {
+      // The native AR view may already be tearing down.
     }
   }
 
@@ -596,6 +661,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     unawaited(() async {
       await perception?.dispose();
       bridge?.clear();
+      await _removeDeformableMesh();
       await session?.dispose();
       softBodyEngine?.dispose();
     }());
