@@ -671,6 +671,22 @@ class ArView(
         return out.toByteArray()
     }
 
+    private fun intrinsicsMap(
+        fx: Float,
+        fy: Float,
+        cx: Float,
+        cy: Float,
+        width: Int,
+        height: Int,
+    ): Map<String, Any> = mapOf(
+        "fx" to fx.toDouble(),
+        "fy" to fy.toDouble(),
+        "cx" to cx.toDouble(),
+        "cy" to cy.toDouble(),
+        "width" to width,
+        "height" to height,
+    )
+
     private fun copyDepth(frame: Frame, image: Image, confidenceImage: Image?, raw: Boolean): DepthCopy {
         val w=image.width; val h=image.height; val p=image.planes[0]; val src=p.buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         val values=ByteBuffer.allocate(w*h*4).order(ByteOrder.LITTLE_ENDIAN)
