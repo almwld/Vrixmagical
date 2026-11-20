@@ -429,6 +429,12 @@ private class SplatKitPlatformView(
             if (dartAttached) {
                 channel.invokeMethod("event", event)
             } else {
+                // Camera pose is a sampled state, not a lossless event stream.
+                // Coalesce it and bound early lifecycle events until Dart attaches.
+                if (type == "cameraPose") {
+                    pendingEvents.removeAll { it["type"] == "cameraPose" }
+                }
+                if (pendingEvents.size >= 64) pendingEvents.removeAt(0)
                 pendingEvents.add(event)
             }
         }
