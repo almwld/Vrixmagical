@@ -157,6 +157,14 @@ class SplatKitViewController extends ChangeNotifier {
     await _invoke('look', {'yaw': yaw, 'pitch': pitch});
   }
 
+  Future<void> setAnchor({
+    required double x,
+    required double y,
+    required double z,
+  }) async {
+    await _invoke('setAnchor', {'x': x, 'y': y, 'z': z});
+  }
+
   Future<void> setWalkVelocity(double forward, double right) async {
     await _invoke('setWalkVelocity', {
       'forward': forward,
