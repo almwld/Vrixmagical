@@ -509,10 +509,14 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     unawaited(LgWingDeckService.instance.hide());
     _stopPhysicsTicker();
     _handTrackingEnabled = false;
-    unawaited(_handPerception?.dispose() ?? Future<void>.value());
+    final handPerception = _handPerception;
+    final session = _session;
     _handPerception = null;
     _physics?.dispose();
-    _session?.dispose();
+    unawaited(() async {
+      await handPerception?.dispose();
+      await session?.dispose();
+    }());
     super.dispose();
   }
 
