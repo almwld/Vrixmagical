@@ -69,6 +69,7 @@ void main() {
           restitution: 0,
         );
 
+        physics.advance(1 / 60);
         final directOverlaps = physics.overlapBody('soft:runtime-test');
         expect(
           directOverlaps.any((hit) => hit.bodyId == 'runtime-probe'),
