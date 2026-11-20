@@ -67,10 +67,16 @@ jobs:
       - name: Verify formatting
         run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib packages/flutter_reality_vrix/lib packages/flutter_reality_vrix/test
 
-      - name: Analyze app and native plugin Dart API
+      - name: Analyze app and integrated Flutter plugin Dart APIs
         run: |
-          flutter analyze --no-fatal-infos
-          dart analyze packages/vrix_soft_body packages/flutter_reality_vrix
+          flutter analyze --no-fatal-infos lib test packages/vrix_soft_body packages/flutter_reality_vrix
+
+      - name: Analyze and test the vendored just_jolt package independently
+        working-directory: just-jolt
+        run: |
+          dart pub get
+          dart analyze lib test
+          dart test --reporter expanded
 
       - name: Unit and widget tests
         env:
