@@ -137,22 +137,19 @@ void main() {
       await store.addView(view(.5));
       await store.addView(view(.7));
 
-      // Force the temporary manifest write to fail without damaging the
-      // previously committed collecting manifest.
-      await Directory(
-        '${store.directory.path}/scan_manifest.json.tmp',
-      ).create();
+      final temporaryPath = '${store.directory.path}/scan_manifest.json.tmp';
+      await Directory(temporaryPath).create();
 
       await expectLater(store.complete(), throwsA(isA<FileSystemException>()));
       expect(store.snapshot.isComplete, isFalse);
 
-      // Remove the injected filesystem fault before verifying that the
-      // rolled-back session can accept another view and commit its manifest.
-      await Directory(
-        '${store.directory.path}/scan_manifest.json.tmp',
-      ).delete();
+      await FileSystemEntity.delete(temporaryPath, recursive: true);
+      expect(await FileSystemEntity.type(temporaryPath), FileSystemEntityType.notFound);
 
-      await expectLater(store.addView(view(.8)), completes);
+      // The same session must remain writable after the failed completion.
+      await store.addView(view(.8));
+      expect(store.snapshot.isComplete, isFalse);
+      expect(store.snapshot.viewCount, 4);
     });
 
     test('rejects invalid camera poses and prompt coordinates', () async {
