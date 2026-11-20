@@ -16,12 +16,12 @@ class GuidedPathDefinition {
     this.exitTolerance = 0.02,
     this.permittedDirection = GuidedPathDirection.both,
   })  : id = id.trim(),
-        controlPoints = List<Vector3>.unmodifiable(
+        _controlPoints = List<Vector3>.unmodifiable(
           controlPoints.map(Vector3.copy),
         ),
         clearanceRadii = List<double>.unmodifiable(clearanceRadii) {
     if (this.id.isEmpty ||
-        this.controlPoints.length < 2 ||
+        this._controlPoints.length < 2 ||
         this.clearanceRadii.length != this.controlPoints.length ||
         !entryTolerance.isFinite ||
         entryTolerance < 0 ||
@@ -55,7 +55,11 @@ class GuidedPathDefinition {
   }
 
   final String id;
-  final List<Vector3> controlPoints;
+  final List<Vector3> _controlPoints;
+
+  /// Returns defensive copies so callers cannot mutate validated geometry.
+  List<Vector3> get controlPoints =>
+      List<Vector3>.unmodifiable(_controlPoints.map(Vector3.copy));
   final List<double> clearanceRadii;
   final double entryTolerance;
   final double exitTolerance;
@@ -84,9 +88,9 @@ class GuidedPathDefinition {
     var bestPoint = Vector3.zero();
     var bestTangent = Vector3.zero();
 
-    for (var i = 0; i < controlPoints.length - 1; i++) {
-      final start = controlPoints[i];
-      final delta = controlPoints[i + 1] - start;
+    for (var i = 0; i < _controlPoints.length - 1; i++) {
+      final start = _controlPoints[i];
+      final delta = _controlPoints[i + 1] - start;
       final t = ((point - start).dot(delta) / delta.length2)
           .clamp(0.0, 1.0)
           .toDouble();
@@ -105,8 +109,8 @@ class GuidedPathDefinition {
     final endRadius = clearanceRadii[bestSegment + 1];
     final clearance = startRadius + (endRadius - startRadius) * bestT;
     final arcLength = _cumulativeLengths[bestSegment] +
-        (controlPoints[bestSegment + 1]
-                .distanceTo(controlPoints[bestSegment]) *
+        (_controlPoints[bestSegment + 1]
+                .distanceTo(_controlPoints[bestSegment]) *
             bestT);
     final normalizedProgress = (arcLength / totalLength).clamp(0.0, 1.0);
     final lateralDistance = math.sqrt(bestDistanceSquared);
