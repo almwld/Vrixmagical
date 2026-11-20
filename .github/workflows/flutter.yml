@@ -92,6 +92,7 @@ jobs:
           grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/debug-apk-files.txt
           grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/debug-apk-files.txt
           grep -F 'lib/arm64-v8a/libsplatkit.so' /tmp/debug-apk-files.txt
+          python3 tool/verify_android_elf_alignment.py --archive build/app/outputs/flutter-apk/app-debug.apk --entry lib/arm64-v8a/libsplatkit.so
 
       - name: Android release APK
         run: flutter build apk --release
@@ -102,6 +103,7 @@ jobs:
           grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-apk-files.txt
           grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-apk-files.txt
           grep -F 'lib/arm64-v8a/libsplatkit.so' /tmp/release-apk-files.txt
+          python3 tool/verify_android_elf_alignment.py --archive build/app/outputs/flutter-apk/app-release.apk --entry lib/arm64-v8a/libsplatkit.so
 
       - name: Android split release APKs
         run: flutter build apk --release --split-per-abi
@@ -115,6 +117,7 @@ jobs:
           grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/split-arm64-files.txt
           grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/split-arm64-files.txt
           grep -F 'lib/arm64-v8a/libsplatkit.so' /tmp/split-arm64-files.txt
+          python3 tool/verify_android_elf_alignment.py --archive "$ARM64_APK" --entry lib/arm64-v8a/libsplatkit.so
 
       - name: Android release App Bundle
         run: flutter build appbundle --release
@@ -125,6 +128,7 @@ jobs:
           grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
           grep -F 'base/lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-aab-files.txt
           grep -F 'base/lib/arm64-v8a/libsplatkit.so' /tmp/release-aab-files.txt
+          python3 tool/verify_android_elf_alignment.py --archive build/app/outputs/bundle/release/app-release.aab --entry base/lib/arm64-v8a/libsplatkit.so
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
