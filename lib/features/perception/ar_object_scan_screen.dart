@@ -385,6 +385,8 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
 
     final physics = PhysicsSceneService();
     VrixSoftBodySceneRuntime? candidateRuntime;
+    String? pendingMeshId;
+    var pendingMeshAdded = false;
     try {
       final result = await const ObjectScanReconstructionService()
           .reconstruct(store.snapshot);
@@ -401,15 +403,20 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         worldTransform: worldTransform,
       );
       final initialFrame = candidateRuntime.advance(1 / 60);
+      _spawnCouplingProbe(
+        physics: physics,
+        runtime: candidateRuntime,
+        scanId: store.id,
+      );
+
       final objectManager = _objects;
       if (objectManager == null) {
         throw StateError('AR object renderer is not ready for deformable mesh upload.');
       }
-
-      final meshId = 'soft-body-${store.id}';
-      await _removeDeformableMesh();
+      pendingMeshId =
+          'soft-body-${store.id}-${DateTime.now().microsecondsSinceEpoch}';
       final addedToAr = await objectManager.addDeformableMesh(
-        id: meshId,
+        id: pendingMeshId,
         positions: initialFrame.positions,
         triangleIndices: initialFrame.surfaceTriangleIndices,
         worldTransform: initialFrame.worldTransform,
@@ -417,27 +424,36 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       if (!addedToAr) {
         throw StateError('Filament refused to create the deformable AR surface.');
       }
+      pendingMeshAdded = true;
 
-      // Commit the new runtime only after both the solver and AR mesh exist.
+      // Commit the new runtime only after its Jolt proxy, XPBD body, contact
+      // probe and live Filament mesh have all been created successfully.
+      final previousMeshId = _deformableMeshId;
+      final previousRuntime = _softBodyRuntime;
+      final previousPhysics = _physicsScene;
       _softBodyTicker?.cancel();
       _handXpbdBridge?.clear();
       _handXpbdBridge = null;
-      _softBodyRuntime?.dispose();
-      _physicsScene?.dispose();
       _softBodyRuntime = candidateRuntime;
       candidateRuntime = null;
       _physicsScene = physics;
       _softBodyWorldTransform = worldTransform;
-      _deformableMeshId = meshId;
+      _deformableMeshId = pendingMeshId;
+      pendingMeshId = null;
+      pendingMeshAdded = false;
       _meshUploadFaultReported = false;
       _softBodyFrame = initialFrame;
       _softBodySteps = _softBodyRuntime!.coupledSteps;
 
-      _spawnCouplingProbe(
-        physics: physics,
-        runtime: _softBodyRuntime!,
-        scanId: store.id,
-      );
+      if (previousMeshId != null) {
+        try {
+          await objectManager.removeDeformableMesh(previousMeshId);
+        } catch (_) {
+          // Keep the new renderable alive even if the old one is already detached.
+        }
+      }
+      previousRuntime?.dispose();
+      previousPhysics?.dispose();
 
       final clock = Stopwatch()..start();
       var previousMicros = clock.elapsedMicroseconds;
@@ -477,6 +493,11 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         });
       }
     } catch (error) {
+      if (pendingMeshAdded && pendingMeshId != null) {
+        try {
+          await _objects?.removeDeformableMesh(pendingMeshId);
+        } catch (_) {}
+      }
       candidateRuntime?.dispose();
       physics.dispose();
       if (mounted) {
