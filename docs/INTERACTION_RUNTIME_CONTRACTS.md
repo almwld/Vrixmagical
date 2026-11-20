@@ -131,7 +131,7 @@ Before adding the pair ABI, choose and test one explicit representation:
 - allocate a collision-pair registry in the world and use a deliberately reserved type value only if the full `findOwner`/tag validation path proves it cannot alias an existing object kind; or
 - revise the object-tag bit allocation for every object kind together, with regression tests proving old/stale/cross-world handles are rejected consistently.
 
-The preferred minimal change is to avoid changing the public encoding for existing body/joint/character handles. The pair registry must still use generation/sequence checks and remain world-owned. Do not assume the unused numeric value zero is safe until `findOwner`, Dart-side handle validation, and all tag consumers have been inspected.
+The preferred minimal change is to avoid changing the public encoding for existing body/joint/character handles. The pair registry must still use generation/sequence checks and remain world-owned. The implementation review has now inspected `findOwner`: it validates the two type bits against the requested `HandleType`, and no current object kind uses value 0. Therefore value 0 is a viable reserved `kCollisionPairHandle` discriminator in the current native encoding, provided it is added explicitly to the enum and used only by pair-specific lookup; no shift or reinterpretation of existing handle bits is required. Dart FFI exposes these values as opaque `Int64` handles and does not decode the type bits. Keep regression tests for cross-kind, stale-generation and cross-world rejection.
 
 This is a pre-implementation safety gate, not evidence that the collision-pair ABI exists.
 
