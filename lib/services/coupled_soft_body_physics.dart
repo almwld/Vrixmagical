@@ -69,9 +69,14 @@ class CoupledSoftBodyPhysics {
   final Map<int, _ActiveContact> _contacts = <int, _ActiveContact>{};
   bool _disposed = false;
   int _coupledSteps = 0;
+  final Vector3 _lastAppliedReactionImpulse = Vector3.zero();
+  int _lastAppliedReactionCount = 0;
 
   int get coupledSteps => _coupledSteps;
   int get activeContactCount => _contacts.length;
+  int get lastAppliedReactionCount => _lastAppliedReactionCount;
+  Vector3 get lastAppliedReactionImpulse =>
+      Vector3.copy(_lastAppliedReactionImpulse);
 
   /// Advances one frame in a deterministic order. Jolt detects contacts first;
   /// XPBD solves those constraints second; XPBD reactions feed Jolt on its next
@@ -189,6 +194,8 @@ class CoupledSoftBodyPhysics {
 
   void _applyXpbdReactions(double deltaSeconds) {
     final reactions = engine.readReactionForces(softBody);
+    _lastAppliedReactionImpulse.setZero();
+    _lastAppliedReactionCount = 0;
     if (_contacts.isEmpty || deltaSeconds <= 0) return;
 
     final impulses = SoftBodyReactionMapper.map(
@@ -213,6 +220,8 @@ class CoupledSoftBodyPhysics {
         impulse.impulse,
         impulse.worldPoint,
       );
+      _lastAppliedReactionImpulse.add(impulse.impulse);
+      _lastAppliedReactionCount++;
     }
   }
 
