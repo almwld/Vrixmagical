@@ -13,7 +13,6 @@ import 'package:flutter_reality/managers/ar_session_manager.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:vector_math/vector_math_64.dart';
 
 import '../../app/app_theme.dart';
 import '../../domain/captured_frame.dart';
