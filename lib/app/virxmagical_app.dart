@@ -1,4 +1,3 @@
-import 'package:flutter_localizations/flutter_localizations.dart' as flutter_l10n;
 import 'package:material_ui/material_ui.dart';
 
 import 'app_theme.dart';
@@ -14,10 +13,7 @@ class VirxMagicalApp extends StatelessWidget {
     theme: AppTheme.dark,
     locale: const Locale('ar'),
     supportedLocales: const [Locale('ar')],
-    localizationsDelegates: const [
-      GlobalMaterialLocalizations.delegate,
-      flutter_l10n.GlobalWidgetsLocalizations.delegate,
-    ],
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
     home: const Directionality(
       textDirection: TextDirection.rtl,
       child: HomeScreen(),
