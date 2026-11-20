@@ -17,6 +17,7 @@ import '../../app/app_theme.dart';
 import '../../domain/vrix_object.dart';
 import '../../services/physics_scene_service.dart';
 import '../../services/lg_wing_deck_service.dart';
+import '../../services/model_arabic_labels.dart';
 
 class _PlacedAsset {
   const _PlacedAsset({
@@ -37,7 +38,9 @@ class _PlacedAsset {
 }
 
 class ArSceneScreen extends StatefulWidget {
-  const ArSceneScreen({super.key});
+  const ArSceneScreen({super.key, this.modelPath});
+
+  final String? modelPath;
 
   @override
   State<ArSceneScreen> createState() => _ArSceneScreenState();
@@ -125,7 +128,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     // only after the user explicitly places the first object.
     if (mounted) {
       setState(() {
-        _status = 'كاميرا الواقع المعزز جاهزة · الفيزياء ستُهيّأ عند تثبيت أول مجسم.';
+        _status = widget.modelPath == null ? 'كاميرا الواقع المعزز جاهزة · اضغط سطحاً لإضافة النموذج التجريبي.' : 'جاهز لإدراج المجسم المحلي عند لمس سطح مكتشف.';
       });
     }
   }
@@ -227,7 +230,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         setState(() { _status = 'MediaPipe يعمل حالياً في وحدة مرآة اليد؛ لم يُدمج بعد داخل جلسة AR لتجنب تعارض الكاميرا.'; });
         break;
       case 'scanInfo':
-        setState(() { _status = 'بيانات RGB-D تحفظ من وحدة مسح الأجسام. دمج Voxel Fusion وإعادة بناء GLB لم يكتمل بعد.'; });
+        setState(() { _status = 'مسح RGB-D ودمج النقاط وإعادة بناء شبكة GLB متاح من وحدة المسح؛ تحقق من نتيجة كل مسح قبل التصدير.'; });
         break;
       case 'hideDeck':
         unawaited(LgWingDeckService.instance.hide());
@@ -299,7 +302,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
 
       final node = ARNode(
         type: NodeType.webGLB,
-        uri: _sampleModel,
+        uri: widget.modelPath == null ? _sampleModel : Uri.file(widget.modelPath!).toString(),
         position: Vector3(0, 0.16, 0),
         scale: Vector3(0.12, 0.12, 0.12),
       );
@@ -314,7 +317,265 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       final identity = VrixObject(
         id: node.name,
         source: ObjectSource.library,
-        displayName: 'Duck sample',
+        displayName: ModelArabicLabels.displayName(widget.modelPath?.split('/').last.replaceAll(RegExp(r'\\.(glb|gltf)
+        meshPath: _sampleModel,
+        physics: const PhysicsProfile(
+          mass: 1,
+          collider: ColliderShape.box,
+          halfExtents: [0.07, 0.06, 0.09],
+          friction: 0.65,
+          restitution: 0.08,
+        ),
+        tags: const ['duck', 'bird', 'sample', 'movable'],
+        metadata: const {'assetKind': 'sample', 'format': 'glb'},
+      );
+
+      var physics = _physics;
+      if (physics == null) {
+        try {
+          physics = PhysicsSceneService();
+          _physics = physics;
+          _startPhysicsTicker();
+        } catch (error) {
+          // A native physics failure must not roll back an otherwise successful
+          // AR placement or take down the camera session.
+          physics = null;
+          if (mounted) {
+            setState(() => _status = 'تم تثبيت المجسم · تعذرت تهيئة Jolt: $error');
+          }
+        }
+      }
+      if (physics != null && !physics.isDisposed) {
+        floorBodyId = 'floor_${node.name}';
+        dynamicBodyId = 'body_${node.name}';
+
+        final planeNormal = Vector3(
+          anchorTransform[4],
+          anchorTransform[5],
+          anchorTransform[6],
+        );
+        if (planeNormal.length2 > 1e-8) {
+          planeNormal.normalize();
+        } else {
+          planeNormal.setValues(0, 1, 0);
+        }
+
+        final floorTransform = Matrix4.copy(anchorTransform)
+          ..setTranslation(
+            anchorTransform.getTranslation() - planeNormal * 0.025,
+          );
+        final bodyTransform = Matrix4.copy(anchorTransform)
+          ..setTranslation(
+            anchorTransform.getTranslation() + planeNormal * 0.16,
+          );
+
+        physics.addStaticBox(
+          id: floorBodyId,
+          worldTransform: floorTransform,
+          halfExtents: Vector3(2, 0.025, 2),
+          friction: 0.9,
+        );
+        physics.addDynamicBox(
+          id: dynamicBodyId,
+          worldTransform: bodyTransform,
+          halfExtents: Vector3(
+            identity.physics.halfExtents[0],
+            identity.physics.halfExtents[1],
+            identity.physics.halfExtents[2],
+          ),
+          friction: identity.physics.friction,
+          restitution: identity.physics.restitution,
+          mass: identity.physics.mass,
+          continuous: identity.physics.continuous,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _placed.add(
+          _PlacedAsset(
+            anchor: anchor,
+            node: node,
+            anchorWorldTransform: anchorTransform,
+            bodyId: dynamicBodyId ?? '',
+            floorBodyId: floorBodyId ?? '',
+            identity: identity,
+          ),
+        );
+        _status = physics == null
+            ? 'تم تثبيت المجسم · محرك الفيزياء غير متاح.'
+            : 'تم تثبيت المجسم · تصادم وجاذبية Jolt مفعّلان.';
+      });
+    } catch (error) {
+      if (dynamicBodyId != null) _physics?.removeBody(dynamicBodyId);
+      if (floorBodyId != null) _physics?.removeBody(floorBodyId);
+      if (createdNode != null) await objects.removeNode(createdNode);
+      if (anchorWasAdded) await anchors.removeAnchor(anchor);
+      if (mounted) setState(() => _status = 'فشلت عملية التثبيت: $error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _removeLast() async {
+    if (_placed.isEmpty) return;
+    final asset = _placed.removeLast();
+    _physics?.removeBody(asset.bodyId);
+    _physics?.removeBody(asset.floorBodyId);
+    _manuallyControlledNodes.remove(asset.node.name);
+    await _objects?.removeNode(asset.node);
+    await _anchors?.removeAnchor(asset.anchor);
+    if (mounted) {
+      setState(
+        () => _status = 'تمت إزالة آخر أصل رقمي. المتبقي: ${_placed.length}',
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(LgWingDeckService.instance.hide());
+    _stopPhysicsTicker();
+    _physics?.dispose();
+    _session?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('الواقع المعزز'),
+      actions: [
+        Padding(
+          padding: const EdgeInsetsDirectional.only(end: 16),
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: .10),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.circle, color: AppColors.success, size: 6),
+                  SizedBox(width: 6),
+                  Text(
+                    'AR SESSION',
+                    style: TextStyle(
+                      color: AppColors.success,
+                      fontSize: 8,
+                      letterSpacing: .8,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+    body: Stack(
+      children: [
+        ARView(
+          showPlatformType: false,
+          planeDetectionConfig: PlaneDetectionConfig.horizontalAndVertical,
+          onARViewCreated: _onCreated,
+        ),
+        Positioned(
+          top: 16,
+          left: 14,
+          right: 14,
+          child: Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: const Color(0xE6101A28),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.radar_rounded, color: AppColors.primary, size: 21),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _status,
+                    style: const TextStyle(
+                      color: AppColors.text,
+                      fontSize: 11,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          left: 14,
+          right: 14,
+          bottom: 16,
+          child: SafeArea(
+            child: Container(
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: const Color(0xEE101A28),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.primary.withValues(alpha: .25)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.view_in_ar_rounded,
+                        color: AppColors.primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 9),
+                      const Expanded(
+                        child: Text(
+                          'الأصول المثبّتة',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      Text(
+                        _placed.length.toString().padLeft(2, '0'),
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 11),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton.icon(
+                      onPressed: _busy || _placed.isEmpty ? null : _removeLast,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      label: const Text('إزالة آخر مجسم'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'المجسمات رقمية ولا تغيّر الأجسام الحقيقية.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+, caseSensitive: false), '') ?? 'Duck'),
         meshPath: _sampleModel,
         physics: const PhysicsProfile(
           mass: 1,
