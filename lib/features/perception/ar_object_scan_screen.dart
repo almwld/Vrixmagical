@@ -837,7 +837,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                     FilledButton.icon(
                       onPressed: _busy ? null : _reconstructScan,
                       icon: const Icon(Icons.view_in_ar_rounded),
-                      label: const Text('إعادة بناء Mesh وتصدير GLB وCollider'),
+                      label: const Text('إعادة البناء وربط Jolt↔XPBD وعرض AR'),
                     ),
                   if (_reconstruction != null && _softBodyRuntime != null)
                     FilledButton.icon(
@@ -854,7 +854,12 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       label: const Text('تصدير الشكل المتشوه إلى GLB'),
                     ),
                   if (_reconstruction != null)
-                    Text('XPBD steps: $_softBodySteps · Tetrahedra: ${_reconstruction!.tetrahedralization.tetrahedronCount}',
+                    Text(
+                      'Jolt contacts: ${_softBodyRuntime?.activeContactCount ?? 0} · '
+                      'XPBD reactions: ${_softBodyRuntime?.lastAppliedReactionCount ?? 0} · '
+                      'AR vertices: ${_softBodyFrame?.vertexCount ?? 0} · '
+                      'XPBD steps: $_softBodySteps · '
+                      'Tetrahedra: ${_reconstruction!.tetrahedralization.tetrahedronCount}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: AppColors.success, fontSize: 10)),
                   if (_reconstruction != null)
