@@ -142,7 +142,6 @@ class ArSessionHandPerception {
   final ValueChanged<ArHandObservation>? onObservation;
   final ValueChanged<Object>? onError;
 
-  final Stopwatch _clock = Stopwatch();
   final Map<String, PinchGesture> _pinchGestures = <String, PinchGesture>{};
   ARSessionManager? _session;
   HandLandmarker? _landmarker;
@@ -165,9 +164,6 @@ class ArSessionHandPerception {
         ),
       );
       _landmarker = landmarker;
-      _clock
-        ..reset()
-        ..start();
       _lastTimestampMilliseconds = -1;
       _pinchGestures.clear();
       _running = true;
@@ -322,7 +318,6 @@ class ArSessionHandPerception {
     _landmarker = null;
     _session = null;
     _pinchGestures.clear();
-    _clock.stop();
     await landmarker?.dispose();
   }
 
