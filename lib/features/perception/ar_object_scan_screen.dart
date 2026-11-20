@@ -57,6 +57,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   Vector3? _probeLocalPosition;
   int _probeContactCount = 0;
   Vector3 _probeReactionImpulse = Vector3.zero();
+  Vector3 _probeContactNormal = Vector3.zero();
   ObjectScanReconstructionResult? _reconstruction;
   String _status = 'حرّك الهاتف ببطء حتى يستقر تتبع ARCore، ثم التقط المنظور الأول.';
   String? _error;
@@ -487,6 +488,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                 _probeContactCount = activeRuntime.activeContactCount;
                 _probeReactionImpulse =
                     activeRuntime.lastAppliedReactionImpulse;
+                _probeContactNormal = activeRuntime.lastContactNormalWorld;
               });
             }
           } catch (error) {
@@ -597,7 +599,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       left: 12,
                       right: 12,
                       child: Text(
-                        'Jolt contacts: $_probeContactCount · XPBD reaction impulse: '
+                        'Jolt contacts: $_probeContactCount · normal: '
+                        '${_probeContactNormal.x.toStringAsFixed(2)}, '
+                        '${_probeContactNormal.y.toStringAsFixed(2)}, '
+                        '${_probeContactNormal.z.toStringAsFixed(2)} · impulse: '
                         '${_probeReactionImpulse.x.toStringAsFixed(3)}, '
                         '${_probeReactionImpulse.y.toStringAsFixed(3)}, '
                         '${_probeReactionImpulse.z.toStringAsFixed(3)} N·s',
