@@ -41,7 +41,7 @@ void main() {
         movingRadius: 0.05,
       );
       expect(projection.closestPoint.x, closeTo(0, 1e-9));
-      expect(projection.progress, closeTo(0.25, 1e-9));
+      expect(projection.progress, closeTo(0.5 / (1 + math.sqrt(2)), 1e-9));
     });
 
     test('rejects a body that exceeds the local clearance', () {
