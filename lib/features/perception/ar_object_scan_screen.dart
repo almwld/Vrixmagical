@@ -458,6 +458,11 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         _physicsScene = physics;
         _softBodyFrame = initialFrame;
         _softBodySteps = activeRuntime.coupledSteps;
+        _probeBodyId = null;
+        _probeLocalPosition = null;
+        _probeContactCount = 0;
+        _probeReactionImpulse = Vector3.zero();
+        _probeContactNormal = Vector3.zero();
 
         final clock = Stopwatch()..start();
         var previousMicros = clock.elapsedMicroseconds;
