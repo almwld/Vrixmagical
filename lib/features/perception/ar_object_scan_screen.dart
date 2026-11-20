@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -12,10 +13,11 @@ import 'package:flutter_reality/managers/ar_session_manager.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:vrix_soft_body/vrix_soft_body.dart';
+import 'package:vector_math/vector_math_64.dart';
 
 import '../../app/app_theme.dart';
 import '../../domain/captured_frame.dart';
+import '../../domain/soft_body_scene_runtime.dart';
 import '../../services/object_scan_store.dart';
 import '../../services/object_scan_reconstruction_service.dart';
 import '../../services/physics_scene_service.dart';
@@ -48,9 +50,15 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   bool _saved = false;
   bool _completed = false;
   PhysicsSceneService? _physicsScene;
-  VrixSoftBodyFfiEngine? _softBodyEngine;
+  VrixSoftBodySceneRuntime? _softBodyRuntime;
+  SoftBodyRenderFrame? _softBodyFrame;
   Timer? _softBodyTicker;
   int _softBodySteps = 0;
+  String? _probeBodyId;
+  Vector3? _probeLocalPosition;
+  int _probeContactCount = 0;
+  Vector3 _probeReactionImpulse = Vector3.zero();
+  Vector3 _probeContactNormal = Vector3.zero();
   ObjectScanReconstructionResult? _reconstruction;
   String _status = 'حرّك الهاتف ببطء حتى يستقر تتبع ARCore، ثم التقط المنظور الأول.';
   String? _error;
@@ -359,81 +367,159 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     }
   }
 
+  void _spawnCouplingProbe() {
+    final runtime = _softBodyRuntime;
+    final physics = _physicsScene;
+    if (runtime == null || physics == null || _probeBodyId != null) return;
+
+    final positions = runtime.mesh.positions;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    for (var i = 1; i < positions.length; i += 3) {
+      minY = math.min(minY, positions[i]);
+      maxY = math.max(maxY, positions[i]);
+    }
+    if (!minY.isFinite || !maxY.isFinite || maxY <= minY) {
+      setState(() => _error = 'لا يمكن تحديد سطح المجسم لإنشاء مسبار التصادم.');
+      return;
+    }
+
+    final topThreshold = maxY - math.max(0.02, (maxY - minY) * 0.08);
+    var topX = 0.0;
+    var topZ = 0.0;
+    var topCount = 0;
+    for (var i = 0; i < positions.length; i += 3) {
+      if (positions[i + 1] < topThreshold) continue;
+      topX += positions[i];
+      topZ += positions[i + 2];
+      topCount++;
+    }
+    if (topCount > 0) {
+      topX /= topCount;
+      topZ /= topCount;
+    }
+
+    final radius = ((maxY - minY) * 0.05).clamp(0.015, 0.05).toDouble();
+    final dropGap = math.max(0.04, radius * 2).toDouble();
+    final localPosition = Vector3(topX, maxY + radius + dropGap, topZ);
+    final worldPosition = runtime.worldTransform.transform3(localPosition);
+    final probeId =
+        'scan-probe-${_store?.id ?? DateTime.now().microsecondsSinceEpoch}';
+    try {
+      physics.addDynamicSphere(
+        id: probeId,
+        worldTransform: Matrix4.identity()..setTranslation(worldPosition),
+        radius: radius,
+        mass: 0.2,
+        friction: 0.4,
+        restitution: 0,
+        continuous: true,
+      );
+      setState(() {
+        _probeBodyId = probeId;
+        _probeLocalPosition = localPosition;
+        _status =
+            'أُضيف مسبار Jolt ديناميكي. راقب عدد نقاط التلامس ومتجه رد فعل XPBD أثناء السقوط.';
+      });
+    } catch (error) {
+      setState(() => _error = 'تعذّر إنشاء مسبار التصادم: $error');
+    }
+  }
+
   Future<void> _reconstructScan() async {
     final store = _store;
     if (_busy || !_completed || store == null) return;
     setState(() {
       _busy = true;
       _error = null;
-      _status = 'جارٍ دمج بيانات RGB-D وإعادة بناء السطح وتصدير GLB…';
+      _status = 'جارٍ دمج RGB-D وبناء الحجم الرباعي وربطه بمحركي XPBD وJolt…';
     });
     try {
       final result = await const ObjectScanReconstructionService().reconstruct(store.snapshot);
       final physics = PhysicsSceneService();
+      VrixSoftBodySceneRuntime? runtime;
       try {
-        result.mesh.bakeStaticCollider(physics, id: 'scan-${store.id}');
-      } catch (_) {
-        physics.dispose();
-        rethrow;
-      }
-      VrixSoftBodyFfiEngine? softBodyEngine;
-      SoftBodyHandle? softBodyHandle;
-      String softBodyStatus = 'محرك XPBD غير متاح على هذا التشغيل.';
-      try {
-        softBodyEngine = VrixSoftBodyFfiEngine.open();
-        softBodyHandle = softBodyEngine.createBody(
-          mesh: result.tetrahedralization.mesh,
-          material: const SoftBodyMaterial(),
-          config: const SoftBodySolverConfig(),
+        // Tetrahedralization stores solver vertices around a local origin.
+        // Restore the original AR world-space center when registering the Jolt proxy.
+        final worldTransform = Matrix4.identity()
+          ..setTranslation(result.tetrahedralization.worldOrigin);
+        final activeRuntime = VrixSoftBodySceneRuntime.fromReconstruction(
+          reconstruction: result,
+          scene: physics,
+          objectId: store.id,
+          worldTransform: worldTransform,
         );
-        // Prime the native solver and validate that it returns a complete
-        // state before advertising the body as initialized.
-        softBodyEngine.step(1 / 60);
-        final initialState = softBodyEngine.readState(softBodyHandle);
-        if (initialState.positions.length != result.tetrahedralization.vertexCount * 3) {
-          throw StateError('XPBD returned a state with an unexpected vertex count.');
-        }
-        softBodyStatus = 'XPBD يعمل؛ العرض المرئي للتشوه وربط التلامس مع Jolt ما زالا منفصلين.';
-      } catch (error) {
-        softBodyEngine?.dispose();
-        softBodyEngine = null;
-        softBodyHandle = null;
-        softBodyStatus = 'لم يبدأ XPBD: $error';
-      }
-      _softBodyTicker?.cancel();
-      _softBodyEngine?.dispose();
-      _softBodyEngine = softBodyEngine;
-      _softBodySteps = 0;
-      final activeSoftBodyEngine = softBodyEngine;
-      final activeSoftBodyHandle = softBodyHandle;
-      if (activeSoftBodyEngine != null && activeSoftBodyHandle != null) {
+        runtime = activeRuntime;
+        final initialFrame = activeRuntime.advance(1 / 60);
+
+        _softBodyTicker?.cancel();
+        _softBodyRuntime?.dispose();
+        _physicsScene?.dispose();
+        _softBodyRuntime = activeRuntime;
+        _physicsScene = physics;
+        _softBodyFrame = initialFrame;
+        _softBodySteps = activeRuntime.coupledSteps;
+        _probeBodyId = null;
+        _probeLocalPosition = null;
+        _probeContactCount = 0;
+        _probeReactionImpulse = Vector3.zero();
+        _probeContactNormal = Vector3.zero();
+
+        final clock = Stopwatch()..start();
+        var previousMicros = clock.elapsedMicroseconds;
         _softBodyTicker = Timer.periodic(const Duration(milliseconds: 16), (_) {
+          if (!mounted || activeRuntime.isDisposed) return;
+          final now = clock.elapsedMicroseconds;
+          final deltaSeconds =
+              ((now - previousMicros) / 1000000).clamp(0.0, 0.05).toDouble();
+          previousMicros = now;
           try {
-            activeSoftBodyEngine.step(1 / 60);
-            _softBodySteps++;
-            if (_softBodySteps % 15 == 0) {
-              final state = activeSoftBodyEngine.readState(activeSoftBodyHandle);
-              if (state.positions.length != result.tetrahedralization.vertexCount * 3) {
-                throw StateError('XPBD state vertex count changed unexpectedly.');
+            final frame = activeRuntime.advance(deltaSeconds);
+            _softBodySteps = activeRuntime.coupledSteps;
+            // Keep the solver at the frame cadence but limit Flutter mesh-preview
+            // uploads to approximately 15 Hz on mobile hardware.
+            if (_softBodySteps % 4 == 0 && mounted) {
+              Vector3? probeLocalPosition;
+              final probeId = _probeBodyId;
+              if (probeId != null) {
+                final probeWorld =
+                    physics.bodyWorldTransform(probeId).getTranslation();
+                final inverseWorld = Matrix4.copy(activeRuntime.worldTransform)
+                  ..invert();
+                probeLocalPosition = inverseWorld.transform3(probeWorld);
               }
-              if (mounted) setState(() {});
+              setState(() {
+                _softBodyFrame = frame;
+                _probeLocalPosition = probeLocalPosition;
+                _probeContactCount = activeRuntime.activeContactCount;
+                _probeReactionImpulse =
+                    activeRuntime.lastAppliedReactionImpulse;
+                _probeContactNormal = activeRuntime.lastContactNormalWorld;
+              });
             }
           } catch (error) {
             _softBodyTicker?.cancel();
-            if (mounted) setState(() => _error = 'توقفت محاكاة XPBD: $error');
+            if (mounted) {
+              setState(() => _error = 'توقفت المحاكاة المقترنة: $error');
+            }
           }
         });
+
+        if (mounted) setState(() {
+          _reconstruction = result;
+          _status =
+              'تم تصدير GLB وتشغيل XPBD مع وكيل تصادم Jolt. تعرض المعاينة السطح المتحرك؛ لم يُعتمد الأداء أو التفاعل على جهاز حقيقي بعد. '
+              'العناصر: ${result.tetrahedralization.tetrahedronCount} · المثلثات: ${result.mesh.triangleCount} · النقاط: ${result.inputPointCount}.';
+        });
+      } catch (_) {
+        runtime?.dispose();
+        physics.dispose();
+        rethrow;
       }
-      _physicsScene?.dispose();
-      _physicsScene = physics;
-      if (mounted) setState(() {
-        _reconstruction = result;
-        _status = 'تم إنشاء GLB وJolt Collider. عناصر XPBD: ${result.tetrahedralization.tetrahedronCount} · ${softBodyStatus} المثلثات: ${result.mesh.triangleCount} · النقاط: ${result.inputPointCount}.';
-      });
     } catch (error) {
       if (mounted) setState(() {
         _error = error.toString();
-        _status = 'تعذرت إعادة البناء. لم يتم اعتماد مجسم أو Collider غير صالح.';
+        _status = 'تعذرت إعادة البناء أو تهيئة المحاكاة. لم يتم اعتماد مجسم أو محاكاة غير صالحة.';
       });
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -467,7 +553,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final session = _session;
     if (session != null) unawaited(session.dispose());
     _softBodyTicker?.cancel();
-    _softBodyEngine?.dispose();
+    _softBodyRuntime?.dispose();
     _physicsScene?.dispose();
     super.dispose();
   }
@@ -484,7 +570,75 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
             onARViewCreated: _onArCreated,
           ),
         ),
-        if (_photoPath != null)
+        if (_reconstruction != null && _softBodyFrame != null)
+          Positioned.fill(
+            child: ColoredBox(
+              color: AppColors.background,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _SoftBodyPreviewPainter(
+                        _softBodyFrame!,
+                        probeLocalPosition: _probeLocalPosition,
+                      ),
+                    ),
+                  ),
+                  const Positioned(
+                    top: 20,
+                    left: 16,
+                    right: 16,
+                    child: Text(
+                      'LIVE XPBD SURFACE · JOLT SENSOR PROXY',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.secondary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                  ),
+                  if (_probeBodyId != null)
+                    Positioned(
+                      top: 42,
+                      left: 12,
+                      right: 12,
+                      child: Text(
+                        'Jolt contacts: $_probeContactCount · normal: '
+                        '${_probeContactNormal.x.toStringAsFixed(2)}, '
+                        '${_probeContactNormal.y.toStringAsFixed(2)}, '
+                        '${_probeContactNormal.z.toStringAsFixed(2)} · impulse: '
+                        '${_probeReactionImpulse.x.toStringAsFixed(3)}, '
+                        '${_probeReactionImpulse.y.toStringAsFixed(3)}, '
+                        '${_probeReactionImpulse.z.toStringAsFixed(3)} N·s',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AppColors.text,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    left: 24,
+                    right: 24,
+                    top: 76,
+                    child: FilledButton.icon(
+                      onPressed: _probeBodyId == null ? _spawnCouplingProbe : null,
+                      icon: const Icon(Icons.sports_mma_rounded),
+                      label: Text(
+                        _probeBodyId == null
+                            ? 'اختبار تصادم Jolt ↔ XPBD'
+                            : 'مسبار التصادم يعمل',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else if (_photoPath != null)
           Positioned.fill(
             child: LayoutBuilder(builder: (context, constraints) {
               final size = Size(constraints.maxWidth, constraints.maxHeight);
@@ -571,7 +725,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       label: const Text('إعادة بناء Mesh وتصدير GLB وCollider'),
                     ),
                   if (_reconstruction != null)
-                    Text('XPBD steps: $_softBodySteps · Tetrahedra: ${_reconstruction!.tetrahedralization.tetrahedronCount}',
+                    Text('Coupled steps: $_softBodySteps · Tetrahedra: ${_reconstruction!.tetrahedralization.tetrahedronCount}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: AppColors.success, fontSize: 10)),
                   if (_reconstruction != null)
@@ -590,4 +744,114 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       ],
     ),
   );
+}
+
+class _SoftBodyPreviewPainter extends CustomPainter {
+  const _SoftBodyPreviewPainter(
+    this.frame, {
+    this.probeLocalPosition,
+  });
+
+  final SoftBodyRenderFrame frame;
+  final Vector3? probeLocalPosition;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final positions = frame.positions;
+    final indices = frame.surfaceTriangleIndices;
+    if (positions.length < 12 || indices.length < 3 || size.isEmpty) return;
+
+    final projected = <Offset>[];
+    var minX = double.infinity;
+    var maxX = double.negativeInfinity;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    for (var i = 0; i < positions.length; i += 3) {
+      final x = positions[i];
+      final y = positions[i + 1];
+      final z = positions[i + 2];
+      final px = (x - z) * 0.70710678118;
+      final py = (x + z) * 0.40824829046 - y * 0.81649658092;
+      projected.add(Offset(px, py));
+      minX = math.min(minX, px);
+      maxX = math.max(maxX, px);
+      minY = math.min(minY, py);
+      maxY = math.max(maxY, py);
+    }
+
+    final probe = probeLocalPosition;
+    if (probe != null) {
+      final px = (probe.x - probe.z) * 0.70710678118;
+      final py = (probe.x + probe.z) * 0.40824829046 - probe.y * 0.81649658092;
+      minX = math.min(minX, px);
+      maxX = math.max(maxX, px);
+      minY = math.min(minY, py);
+      maxY = math.max(maxY, py);
+    }
+
+    final spanX = math.max(maxX - minX, 1e-4);
+    final spanY = math.max(maxY - minY, 1e-4);
+    final scale = math.min(
+      (size.width - 48) / spanX,
+      (size.height - 72) / spanY,
+    );
+    final centerX = (minX + maxX) * 0.5;
+    final centerY = (minY + maxY) * 0.5;
+    final points = projected
+        .map((point) => Offset(
+              size.width * 0.5 + (point.dx - centerX) * scale,
+              size.height * 0.53 - (point.dy - centerY) * scale,
+            ))
+        .toList(growable: false);
+
+    final fill = Paint()
+      ..color = AppColors.secondary.withValues(alpha: 0.10)
+      ..style = PaintingStyle.fill;
+    final edge = Paint()
+      ..color = AppColors.secondary.withValues(alpha: 0.78)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8;
+    if (probe != null) {
+      final px = (probe.x - probe.z) * 0.70710678118;
+      final py = (probe.x + probe.z) * 0.40824829046 - probe.y * 0.81649658092;
+      final probePoint = Offset(
+        size.width * 0.5 + (px - centerX) * scale,
+        size.height * 0.53 - (py - centerY) * scale,
+      );
+      canvas.drawCircle(
+        probePoint,
+        8,
+        Paint()..color = AppColors.primary,
+      );
+      canvas.drawCircle(
+        probePoint,
+        12,
+        Paint()
+          ..color = AppColors.primary
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2,
+      );
+    }
+
+    final triangleCount = indices.length ~/ 3;
+    final stride = math.max(1, (triangleCount / 3500).ceil());
+    for (var triangle = 0; triangle < triangleCount; triangle += stride) {
+      final offset = triangle * 3;
+      final a = points[indices[offset]];
+      final b = points[indices[offset + 1]];
+      final c = points[indices[offset + 2]];
+      final path = Path()
+        ..moveTo(a.dx, a.dy)
+        ..lineTo(b.dx, b.dy)
+        ..lineTo(c.dx, c.dy)
+        ..close();
+      canvas.drawPath(path, fill);
+      canvas.drawPath(path, edge);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SoftBodyPreviewPainter oldDelegate) =>
+      oldDelegate.frame.frameNumber != frame.frameNumber ||
+      oldDelegate.probeLocalPosition != probeLocalPosition;
 }
