@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import '../../app/app_theme.dart';
+import '../../services/vrix_settings_store.dart';
 
 enum _SettingsGroup { interface, engine, interaction, device, privacy }
 
@@ -47,8 +48,27 @@ class _SettingsDetailScreen extends StatefulWidget {
 class _SettingsDetailScreenState extends State<_SettingsDetailScreen> {
   final Map<String, bool> _switches = {'rtl':true,'animations':true,'showNames':true,'pbr':true,'hand':false,'physics':true,'breathing':true,'gaze':true,'wing':true,'saveLocal':true,'analytics':false};
   double _quality=.75, _touch=.18;
+
+  @override
+  void initState() {
+    super.initState();
+    VrixSettingsStore.load().then((values) {
+      if (!mounted) return;
+      setState(() {
+        for (final entry in values.entries) {
+          if (_switches.containsKey(entry.key) && entry.value is bool) {
+            _switches[entry.key] = entry.value as bool;
+          }
+        }
+        if (values['quality'] is num) _quality = (values['quality'] as num).toDouble().clamp(0.0, 1.0);
+        if (values['touch'] is num) _touch = (values['touch'] as num).toDouble().clamp(0.0, 1.0);
+      });
+    });
+  }
+
+  Future<void> _persist() => VrixSettingsStore.save(<String, Object?>{..._switches, 'quality': _quality, 'touch': _touch});
   Widget _toggle(String key,String title,String description) => SwitchListTile(
-    value:_switches[key]??false,onChanged:(v)=>setState(()=>_switches[key]=v),
+    value:_switches[key]??false,onChanged:(v){setState(()=>_switches[key]=v);_persist();},
     title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:12)),
     subtitle:Text(description,style:const TextStyle(color:AppColors.muted,fontSize:10)),activeThumbColor:AppColors.primary);
   Widget _slider(String title,double value,ValueChanged<double> onChanged) => Card(child:Padding(padding:const EdgeInsets.all(15),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
