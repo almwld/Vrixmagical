@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+import 'dart:ui' show Offset;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math_64.dart';
 import 'package:virxmagical/features/hand/hand_gesture_math.dart';
