@@ -53,6 +53,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   SoftBodyRenderFrame? _softBodyFrame;
   Timer? _softBodyTicker;
   int _softBodySteps = 0;
+  String? _probeBodyId;
+  Vector3? _probeLocalPosition;
+  int _probeContactCount = 0;
+  Vector3 _probeReactionImpulse = Vector3.zero();
   ObjectScanReconstructionResult? _reconstruction;
   String _status = 'حرّك الهاتف ببطء حتى يستقر تتبع ARCore، ثم التقط المنظور الأول.';
   String? _error;
@@ -361,6 +365,64 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     }
   }
 
+  Future<void> _spawnCouplingProbe() async {
+    final runtime = _softBodyRuntime;
+    final physics = _physicsScene;
+    if (runtime == null || physics == null || _probeBodyId != null) return;
+
+    final positions = runtime.mesh.positions;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    for (var i = 1; i < positions.length; i += 3) {
+      minY = math.min(minY, positions[i]);
+      maxY = math.max(maxY, positions[i]);
+    }
+    if (!minY.isFinite || !maxY.isFinite || maxY <= minY) {
+      setState(() => _error = 'لا يمكن تحديد سطح المجسم لإنشاء مسبار التصادم.');
+      return;
+    }
+
+    final topThreshold = maxY - math.max(0.02, (maxY - minY) * 0.08);
+    var topX = 0.0;
+    var topZ = 0.0;
+    var topCount = 0;
+    for (var i = 0; i < positions.length; i += 3) {
+      if (positions[i + 1] < topThreshold) continue;
+      topX += positions[i];
+      topZ += positions[i + 2];
+      topCount++;
+    }
+    if (topCount > 0) {
+      topX /= topCount;
+      topZ /= topCount;
+    }
+
+    final radius = ((maxY - minY) * 0.045).clamp(0.025, 0.06).toDouble();
+    final localPosition = Vector3(topX, maxY + radius + 0.12, topZ);
+    final worldPosition = runtime.worldTransform.transform3(localPosition);
+    final probeId =
+        'scan-probe-${_store?.id ?? DateTime.now().microsecondsSinceEpoch}';
+    try {
+      physics.addDynamicSphere(
+        id: probeId,
+        worldTransform: Matrix4.identity()..setTranslation(worldPosition),
+        radius: radius,
+        mass: 0.2,
+        friction: 0.4,
+        restitution: 0,
+        continuous: true,
+      );
+      setState(() {
+        _probeBodyId = probeId;
+        _probeLocalPosition = localPosition;
+        _status =
+            'أُضيف مسبار Jolt ديناميكي. راقب عدد نقاط التلامس ومتجه رد فعل XPBD أثناء السقوط.';
+      });
+    } catch (error) {
+      setState(() => _error = 'تعذّر إنشاء مسبار التصادم: $error');
+    }
+  }
+
   Future<void> _reconstructScan() async {
     final store = _store;
     if (_busy || !_completed || store == null) return;
@@ -409,7 +471,22 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
             // Keep the solver at the frame cadence but limit Flutter mesh-preview
             // uploads to approximately 15 Hz on mobile hardware.
             if (_softBodySteps % 4 == 0 && mounted) {
-              setState(() => _softBodyFrame = frame);
+              Vector3? probeLocalPosition;
+              final probeId = _probeBodyId;
+              if (probeId != null) {
+                final probeWorld =
+                    physics.bodyWorldTransform(probeId).getTranslation();
+                final inverseWorld = Matrix4.copy(activeRuntime.worldTransform)
+                  ..invert();
+                probeLocalPosition = inverseWorld.transform3(probeWorld);
+              }
+              setState(() {
+                _softBodyFrame = frame;
+                _probeLocalPosition = probeLocalPosition;
+                _probeContactCount = activeRuntime.activeContactCount;
+                _probeReactionImpulse =
+                    activeRuntime.lastAppliedReactionImpulse;
+              });
             }
           } catch (error) {
             _softBodyTicker?.cancel();
@@ -492,7 +569,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                 children: [
                   Positioned.fill(
                     child: CustomPaint(
-                      painter: _SoftBodyPreviewPainter(_softBodyFrame!),
+                      painter: _SoftBodyPreviewPainter(
+                        _softBodyFrame!,
+                        probeLocalPosition: _probeLocalPosition,
+                      ),
                     ),
                   ),
                   const Positioned(
@@ -507,6 +587,38 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1.1,
+                      ),
+                    ),
+                  ),
+                  if (_probeBodyId != null)
+                    Positioned(
+                      top: 42,
+                      left: 12,
+                      right: 12,
+                      child: Text(
+                        'Jolt contacts: $_probeContactCount · XPBD reaction impulse: '
+                        '${_probeReactionImpulse.x.toStringAsFixed(3)}, '
+                        '${_probeReactionImpulse.y.toStringAsFixed(3)}, '
+                        '${_probeReactionImpulse.z.toStringAsFixed(3)} N·s',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AppColors.text,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 20,
+                    child: FilledButton.icon(
+                      onPressed: _probeBodyId == null ? _spawnCouplingProbe : null,
+                      icon: const Icon(Icons.sports_mma_rounded),
+                      label: Text(
+                        _probeBodyId == null
+                            ? 'اختبار تصادم Jolt ↔ XPBD'
+                            : 'مسبار التصادم يعمل',
                       ),
                     ),
                   ),
@@ -623,9 +735,13 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
 }
 
 class _SoftBodyPreviewPainter extends CustomPainter {
-  const _SoftBodyPreviewPainter(this.frame);
+  const _SoftBodyPreviewPainter(
+    this.frame, {
+    this.probeLocalPosition,
+  });
 
   final SoftBodyRenderFrame frame;
+  final Vector3? probeLocalPosition;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -645,6 +761,16 @@ class _SoftBodyPreviewPainter extends CustomPainter {
       final px = (x - z) * 0.70710678118;
       final py = (x + z) * 0.40824829046 - y * 0.81649658092;
       projected.add(Offset(px, py));
+      minX = math.min(minX, px);
+      maxX = math.max(maxX, px);
+      minY = math.min(minY, py);
+      maxY = math.max(maxY, py);
+    }
+
+    final probe = probeLocalPosition;
+    if (probe != null) {
+      final px = (probe.x - probe.z) * 0.70710678118;
+      final py = (probe.x + probe.z) * 0.40824829046 - probe.y * 0.81649658092;
       minX = math.min(minX, px);
       maxX = math.max(maxX, px);
       minY = math.min(minY, py);
@@ -673,6 +799,28 @@ class _SoftBodyPreviewPainter extends CustomPainter {
       ..color = AppColors.secondary.withValues(alpha: 0.78)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8;
+    if (probe != null) {
+      final px = (probe.x - probe.z) * 0.70710678118;
+      final py = (probe.x + probe.z) * 0.40824829046 - probe.y * 0.81649658092;
+      final probePoint = Offset(
+        size.width * 0.5 + (px - centerX) * scale,
+        size.height * 0.53 - (py - centerY) * scale,
+      );
+      canvas.drawCircle(
+        probePoint,
+        8,
+        Paint()..color = AppColors.primary,
+      );
+      canvas.drawCircle(
+        probePoint,
+        12,
+        Paint()
+          ..color = AppColors.primary
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2,
+      );
+    }
+
     final triangleCount = indices.length ~/ 3;
     final stride = math.max(1, (triangleCount / 3500).ceil());
     for (var triangle = 0; triangle < triangleCount; triangle += stride) {
@@ -692,5 +840,6 @@ class _SoftBodyPreviewPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SoftBodyPreviewPainter oldDelegate) =>
-      oldDelegate.frame.frameNumber != frame.frameNumber;
+      oldDelegate.frame.frameNumber != frame.frameNumber ||
+      oldDelegate.probeLocalPosition != probeLocalPosition;
 }
