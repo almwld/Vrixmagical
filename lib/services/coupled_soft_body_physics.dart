@@ -38,14 +38,7 @@ class CoupledSoftBodyPhysics {
         !maxContactDistance.isFinite || maxContactDistance <= 0) {
       throw ArgumentError('Invalid deformable contact parameters.');
     }
-    final localVertices = <Vector3>[
-      for (var i = 0; i < mesh.vertexCount; i++)
-        Vector3(
-          mesh.positions[i * 3],
-          mesh.positions[i * 3 + 1],
-          mesh.positions[i * 3 + 2],
-        ),
-    ];
+    final localVertices = _buildBoundedProxyVertices();
     scene.addKinematicConvexHull(
       id: proxyBodyId,
       worldTransform: _initialTransform,
@@ -98,6 +91,64 @@ class CoupledSoftBodyPhysics {
     _applyXpbdReactions(deltaSeconds);
     _coupledSteps++;
     return rigidSteps;
+  }
+
+  /// Jolt's convex proxy is only a broadphase approximation. Keep it
+  /// bounded for mobile even when a scan contains tens of thousands of XPBD
+  /// vertices. The AABB corners preserve conservative spatial coverage while
+  /// deterministic surface samples retain some curvature for contact queries.
+  List<Vector3> _buildBoundedProxyVertices() {
+    const maximumProxyVertices = 4096;
+    if (mesh.vertexCount <= maximumProxyVertices) {
+      return List<Vector3>.generate(
+        mesh.vertexCount,
+        (index) => Vector3(
+          mesh.positions[index * 3],
+          mesh.positions[index * 3 + 1],
+          mesh.positions[index * 3 + 2],
+        ),
+        growable: false,
+      );
+    }
+
+    var minX = double.infinity;
+    var minY = double.infinity;
+    var minZ = double.infinity;
+    var maxX = double.negativeInfinity;
+    var maxY = double.negativeInfinity;
+    var maxZ = double.negativeInfinity;
+    for (var i = 0; i < mesh.vertexCount; i++) {
+      final x = mesh.positions[i * 3];
+      final y = mesh.positions[i * 3 + 1];
+      final z = mesh.positions[i * 3 + 2];
+      minX = math.min(minX, x);
+      minY = math.min(minY, y);
+      minZ = math.min(minZ, z);
+      maxX = math.max(maxX, x);
+      maxY = math.max(maxY, y);
+      maxZ = math.max(maxZ, z);
+    }
+
+    final vertices = <Vector3>[
+      Vector3(minX, minY, minZ),
+      Vector3(minX, minY, maxZ),
+      Vector3(minX, maxY, minZ),
+      Vector3(minX, maxY, maxZ),
+      Vector3(maxX, minY, minZ),
+      Vector3(maxX, minY, maxZ),
+      Vector3(maxX, maxY, minZ),
+      Vector3(maxX, maxY, maxZ),
+    ];
+    final sampleBudget = maximumProxyVertices - vertices.length;
+    final stride = (mesh.vertexCount / sampleBudget).ceil();
+    for (var i = 0; i < mesh.vertexCount && vertices.length < maximumProxyVertices; i += stride) {
+      vertices.add(Vector3(
+        mesh.positions[i * 3],
+        mesh.positions[i * 3 + 1],
+        mesh.positions[i * 3 + 2],
+      ));
+    }
+    return vertices;
   }
 
   void _moveProxyToSoftBodyCentre(List<double> positions, double dt) {
