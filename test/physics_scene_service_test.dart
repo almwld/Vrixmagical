@@ -291,8 +291,8 @@ void main() {
       physics.advance(1 / 60);
 
       final after = physics.bodyWorldTransform('torque-box');
-      expect((after.entry(0) - before.entry(0)).abs(), greaterThan(1e-3));
-      expect((after.entry(2) - before.entry(2)).abs(), greaterThan(1e-3));
+      expect((after.entry(0, 0) - before.entry(0, 0)).abs(), greaterThan(1e-3));
+      expect((after.entry(2, 0) - before.entry(2, 0)).abs(), greaterThan(1e-3));
       expect(after.getTranslation().z, closeTo(0, 0.01));
     });
 
