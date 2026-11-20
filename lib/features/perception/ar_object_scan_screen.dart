@@ -13,12 +13,16 @@ import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:vrix_soft_body/vrix_soft_body.dart';
+import 'package:vector_math/vector_math_64.dart';
 
 import '../../app/app_theme.dart';
 import '../../domain/captured_frame.dart';
 import '../../services/object_scan_store.dart';
 import '../../services/object_scan_reconstruction_service.dart';
 import '../../services/physics_scene_service.dart';
+import '../../services/ar_session_hand_perception.dart';
+import '../../services/ar_hand_xpbd_bridge.dart';
+import '../../services/voxel_mesh_reconstruction.dart';
 
 /// Captures RGB, calibrated ARCore world pose and a user-refined mask from
 /// the same AR session. ARCore remains the sole camera/session owner.
@@ -31,6 +35,10 @@ class ArObjectScanScreen extends StatefulWidget {
 
 class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   ARSessionManager? _session;
+  ARObjectManager? _objects;
+  String? _deformableMeshId;
+  bool _meshUploadInFlight = false;
+  bool _meshUploadFaultReported = false;
   InteractiveSegmenter? _segmenter;
   ObjectScanStore? _store;
   String? _photoPath;
@@ -49,6 +57,11 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   bool _completed = false;
   PhysicsSceneService? _physicsScene;
   VrixSoftBodyFfiEngine? _softBodyEngine;
+  SoftBodyHandle? _softBodyHandle;
+  Matrix4? _softBodyWorldTransform;
+  ArSessionHandPerception? _handPerception;
+  ArHandXpbdBridge? _handXpbdBridge;
+  bool _handInteractionEnabled = false;
   Timer? _softBodyTicker;
   int _softBodySteps = 0;
   ObjectScanReconstructionResult? _reconstruction;
@@ -71,6 +84,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     ARLocationManager locations,
   ) {
     _session = session;
+    _objects = objects;
     session.onError = (message) {
       if (mounted) setState(() => _error = message);
     };
@@ -393,7 +407,32 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         if (initialState.positions.length != result.tetrahedralization.vertexCount * 3) {
           throw StateError('XPBD returned a state with an unexpected vertex count.');
         }
-        softBodyStatus = 'XPBD يعمل؛ العرض المرئي للتشوه وربط التلامس مع Jolt ما زالا منفصلين.';
+        final objectManager = _objects;
+        if (objectManager == null) {
+          throw StateError('AR object renderer is not ready for deformable mesh upload.');
+        }
+        final meshId = 'soft-body-${store.id}';
+        final previousMeshId = _deformableMeshId;
+        if (previousMeshId != null) {
+          await objectManager.removeDeformableMesh(previousMeshId);
+          _deformableMeshId = null;
+        }
+        final addedToAr = await objectManager.addDeformableMesh(
+          id: meshId,
+          positions: initialState.positions,
+          triangleIndices: result.tetrahedralization.mesh.surfaceTriangleIndices,
+          worldTransform: Matrix4.translationValues(
+            result.tetrahedralization.originWorldMeters.x,
+            result.tetrahedralization.originWorldMeters.y,
+            result.tetrahedralization.originWorldMeters.z,
+          ),
+        );
+        if (!addedToAr) {
+          throw StateError('Filament refused to create the deformable AR surface.');
+        }
+        _deformableMeshId = meshId;
+        _meshUploadFaultReported = false;
+        softBodyStatus = 'XPBD متصل بسطح Filament داخل جلسة AR؛ ربط التصادم مع Jolt ما زال قيد الإكمال.';
       } catch (error) {
         softBodyEngine?.dispose();
         softBodyEngine = null;
@@ -401,8 +440,15 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         softBodyStatus = 'لم يبدأ XPBD: $error';
       }
       _softBodyTicker?.cancel();
+      _handXpbdBridge?.clear();
+      _handXpbdBridge = null;
       _softBodyEngine?.dispose();
       _softBodyEngine = softBodyEngine;
+      _softBodyHandle = softBodyHandle;
+      final origin = result.tetrahedralization.originWorldMeters;
+      _softBodyWorldTransform = softBodyHandle == null
+          ? null
+          : Matrix4.translationValues(origin.x, origin.y, origin.z);
       _softBodySteps = 0;
       final activeSoftBodyEngine = softBodyEngine;
       final activeSoftBodyHandle = softBodyHandle;
@@ -411,11 +457,12 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
           try {
             activeSoftBodyEngine.step(1 / 60);
             _softBodySteps++;
-            if (_softBodySteps % 15 == 0) {
+            if (_softBodySteps % 4 == 0) {
               final state = activeSoftBodyEngine.readState(activeSoftBodyHandle);
               if (state.positions.length != result.tetrahedralization.vertexCount * 3) {
                 throw StateError('XPBD state vertex count changed unexpectedly.');
               }
+              _uploadDeformableMeshFrame(state.positions);
               if (mounted) setState(() {});
             }
           } catch (error) {
@@ -435,6 +482,147 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
         _error = error.toString();
         _status = 'تعذرت إعادة البناء. لم يتم اعتماد مجسم أو Collider غير صالح.';
       });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _uploadDeformableMeshFrame(List<double> positions) {
+    final objectManager = _objects;
+    final meshId = _deformableMeshId;
+    final worldTransform = _softBodyWorldTransform;
+    if (objectManager == null || meshId == null || worldTransform == null ||
+        _meshUploadInFlight || _meshUploadFaultReported) {
+      return;
+    }
+    _meshUploadInFlight = true;
+    unawaited(objectManager.updateDeformableMesh(
+      id: meshId,
+      positions: positions,
+      worldTransform: worldTransform,
+    ).catchError((Object error) {
+      if (_meshUploadFaultReported) return;
+      _meshUploadFaultReported = true;
+      if (mounted) setState(() =>
+          _error = 'تعذّر تحديث سطح XPBD داخل AR: $error');
+    }).whenComplete(() {
+      _meshUploadInFlight = false;
+    }));
+  }
+
+  Future<void> _removeDeformableMesh() async {
+    final meshId = _deformableMeshId;
+    _deformableMeshId = null;
+    if (meshId == null) return;
+    try {
+      await _objects?.removeDeformableMesh(meshId);
+    } catch (_) {
+      // The native AR view may already be tearing down.
+    }
+  }
+
+  Future<void> _startHandXpbdInteraction() async {
+    final session = _session;
+    final engine = _softBodyEngine;
+    final body = _softBodyHandle;
+    final worldFromObject = _softBodyWorldTransform;
+    if (_busy || session == null || engine == null || body == null ||
+        worldFromObject == null || _handInteractionEnabled) {
+      return;
+    }
+
+    final bridge = ArHandXpbdBridge(
+      driver: NativeXpbdPointTargetDriver(engine: engine, body: body),
+      compliance: 0.0001,
+      maximumTargetDistanceMeters: 0.14,
+    );
+    final perception = ArSessionHandPerception(
+      onObservation: (observation) {
+        if (!mounted || !_handInteractionEnabled) return;
+        try {
+          bridge.update(
+            observation: observation,
+            worldFromObject: worldFromObject,
+          );
+          if (bridge.activeTargets.isNotEmpty) {
+            setState(() => _status =
+                'تفاعل يدوي مباشر مع XPBD · نقاط التحكم: ${bridge.activeTargets.length} · '
+                'الخطوة: $_softBodySteps');
+          } else if (!observation.depthAvailable) {
+            setState(() => _status =
+                'MediaPipe يرى اليد، لكن العمق غير متاح لتحديد نقطة تشوه ثلاثية الأبعاد.');
+          }
+        } catch (error) {
+          if (mounted) setState(() => _error = 'تعذّر تحديث قيد XPBD: $error');
+        }
+      },
+      onError: (error) {
+        if (mounted) setState(() => _error = 'تعذّر تتبع اليد داخل ARCore: $error');
+      },
+    );
+
+    try {
+      await perception.start(session);
+      if (!mounted) {
+        await perception.dispose();
+        bridge.clear();
+        return;
+      }
+      _handPerception = perception;
+      _handXpbdBridge = bridge;
+      _handInteractionEnabled = true;
+      setState(() => _status =
+          'MediaPipe متصل بجلسة ARCore وXPBD · افتح يدك ثم اقرص سطح المجسم لتحريكه.');
+    } catch (error) {
+      await perception.dispose();
+      bridge.clear();
+      if (mounted) setState(() => _error = 'فشل تشغيل تفاعل اليد مع XPBD: $error');
+    }
+  }
+
+  Future<void> _stopHandXpbdInteraction() async {
+    _handInteractionEnabled = false;
+    final perception = _handPerception;
+    final bridge = _handXpbdBridge;
+    _handPerception = null;
+    _handXpbdBridge = null;
+    await perception?.dispose();
+    bridge?.clear();
+    if (mounted) setState(() => _status = 'تم إيقاف تتبع اليد وتحرير قيود XPBD.');
+  }
+
+  Future<void> _exportDeformedGlb() async {
+    final reconstruction = _reconstruction;
+    final engine = _softBodyEngine;
+    final body = _softBodyHandle;
+    if (_busy || reconstruction == null || engine == null || body == null) return;
+    setState(() {
+      _busy = true;
+      _status = 'جارٍ قراءة حالة XPBD وتصدير السطح المتشوه إلى GLB…';
+    });
+    try {
+      final state = engine.readState(body);
+      final vertices = List<Vector3>.generate(
+        state.positions.length ~/ 3,
+        (index) => Vector3(
+          state.positions[index * 3],
+          state.positions[index * 3 + 1],
+          state.positions[index * 3 + 2],
+        ),
+        growable: false,
+      );
+      final deformedMesh = ReconstructedVoxelMesh(
+        vertices: vertices,
+        triangleIndices: reconstruction.tetrahedralization.mesh.surfaceTriangleIndices,
+        voxelSizeMeters: reconstruction.mesh.voxelSizeMeters,
+      );
+      final output = File(
+        '${reconstruction.glbFile.parent.path}/deformed-${DateTime.now().millisecondsSinceEpoch}.glb',
+      );
+      await deformedMesh.exportGlb(output);
+      if (mounted) setState(() => _status = 'تم تصدير الحالة المشوهة من XPBD: ${output.path}');
+    } catch (error) {
+      if (mounted) setState(() => _error = 'فشل تصدير السطح المتشوه: $error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -465,9 +653,18 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     final segmenter = _segmenter;
     if (segmenter != null) unawaited(segmenter.dispose());
     final session = _session;
-    if (session != null) unawaited(session.dispose());
+    final perception = _handPerception;
+    final bridge = _handXpbdBridge;
+    final softBodyEngine = _softBodyEngine;
+    _handInteractionEnabled = false;
     _softBodyTicker?.cancel();
-    _softBodyEngine?.dispose();
+    unawaited(() async {
+      await perception?.dispose();
+      bridge?.clear();
+      await _removeDeformableMesh();
+      await session?.dispose();
+      softBodyEngine?.dispose();
+    }());
     _physicsScene?.dispose();
     super.dispose();
   }
@@ -569,6 +766,20 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
                       onPressed: _busy ? null : _reconstructScan,
                       icon: const Icon(Icons.view_in_ar_rounded),
                       label: const Text('إعادة بناء Mesh وتصدير GLB وCollider'),
+                    ),
+                  if (_reconstruction != null && _softBodyEngine != null && _softBodyHandle != null)
+                    FilledButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : (_handInteractionEnabled ? _stopHandXpbdInteraction : _startHandXpbdInteraction),
+                      icon: Icon(_handInteractionEnabled ? Icons.front_hand_rounded : Icons.touch_app_rounded),
+                      label: Text(_handInteractionEnabled ? 'إيقاف تفاعل اليد مع XPBD' : 'تشغيل تفاعل اليد مع XPBD'),
+                    ),
+                  if (_reconstruction != null && _softBodyEngine != null && _softBodyHandle != null)
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _exportDeformedGlb,
+                      icon: const Icon(Icons.file_download_outlined),
+                      label: const Text('تصدير الشكل المتشوه إلى GLB'),
                     ),
                   if (_reconstruction != null)
                     Text('XPBD steps: $_softBodySteps · Tetrahedra: ${_reconstruction!.tetrahedralization.tetrahedronCount}',

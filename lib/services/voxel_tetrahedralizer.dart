@@ -12,12 +12,15 @@ import 'package:vrix_soft_body/vrix_soft_body.dart' show SoftBodyMeshData;
 class TetrahedralizedScan {
   const TetrahedralizedScan({
     required this.mesh,
+    required this.originWorldMeters,
     required this.minimumAbsoluteSixVolume,
     required this.maximumAbsoluteSixVolume,
     required this.boundaryFaceCount,
   });
 
   final SoftBodyMeshData mesh;
+  /// World-space center removed from the voxel grid to create object-local metres.
+  final Vector3 originWorldMeters;
   final double minimumAbsoluteSixVolume;
   final double maximumAbsoluteSixVolume;
   final int boundaryFaceCount;
@@ -173,6 +176,11 @@ class VoxelTetrahedralizer {
     }
     if (surface.isEmpty) throw StateError('Tetrahedralization produced no boundary surface.');
 
+    final originWorldMeters = Vector3(
+      originX * voxelSizeMeters,
+      originY * voxelSizeMeters,
+      originZ * voxelSizeMeters,
+    );
     final mesh = SoftBodyMeshData(
       positions: vertices,
       tetrahedronIndices: tetrahedra,
@@ -180,6 +188,7 @@ class VoxelTetrahedralizer {
     );
     final result = TetrahedralizedScan(
       mesh: mesh,
+      originWorldMeters: originWorldMeters,
       minimumAbsoluteSixVolume: minSixVolume,
       maximumAbsoluteSixVolume: maxSixVolume,
       boundaryFaceCount: surface.length ~/ 3,

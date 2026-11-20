@@ -31,6 +31,7 @@ import com.flutterreality.flutter_reality.Serialization.deserializeMatrix4
 import com.flutterreality.flutter_reality.Serialization.serializePose
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.platform.PlatformView
 import io.github.sceneview.ar.ARSceneView
 import io.github.sceneview.ar.arcore.canHostCloudAnchor
@@ -40,6 +41,9 @@ import io.github.sceneview.ar.node.CloudAnchorNode
 import io.github.sceneview.gesture.MoveGestureDetector
 import io.github.sceneview.gesture.RotateGestureDetector
 import io.github.sceneview.math.Position
+import io.github.sceneview.geometries.Geometry
+import io.github.sceneview.node.GeometryNode
+import com.google.android.filament.RenderableManager
 import io.github.sceneview.math.Transform
 import io.github.sceneview.model.ModelInstance
 import io.github.sceneview.node.ModelNode
@@ -80,6 +84,7 @@ class ArView(
     private var sceneView: ARSceneView
     private val mainScope = CoroutineScope(Dispatchers.Main)
     private val scanChannel = MethodChannel(messenger, "flutter_reality/scan_$channelSuffix")
+    private val meshChannel = MethodChannel(messenger, "flutter_reality/mesh_$channelSuffix")
     @Volatile private var pendingScanResult: MethodChannel.Result? = null
     @Volatile private var depthSupportStatus = "notChecked"
     private var lastRawDepthTimestamp: Long? = null
@@ -91,6 +96,8 @@ class ArView(
     private val objectFlutterApi = ARObjectFlutterApi(messenger, channelSuffix)
     private val anchorFlutterApi = ARAnchorFlutterApi(messenger, channelSuffix)
     private val nodesMap = mutableMapOf<String, ModelNode>()
+    private val deformableNodes = mutableMapOf<String, GeometryNode>()
+    private val deformableIndices = mutableMapOf<String, List<Int>>()
     private var selectedNode: Node? = null
     private val detectedPlanes = mutableSetOf<Plane>()
     private val anchorNodesMap = mutableMapOf<String, AnchorNode>()
@@ -154,9 +161,218 @@ class ArView(
                 else -> result.notImplemented()
             }
         }
+        meshChannel.setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "add" -> result.success(addDeformableMesh(call))
+                    "update" -> {
+                        updateDeformableMesh(call)
+                        result.success(null)
+                    }
+                    "remove" -> {
+                        removeDeformableMesh(call)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (error: Exception) {
+                result.error("DEFORMABLE_MESH_ERROR", error.message, null)
+            }
+        }
         ARSessionHostApi.setUp(messenger, SessionApiHandler(), channelSuffix)
         ARObjectHostApi.setUp(messenger, this, channelSuffix)
         ARAnchorHostApi.setUp(messenger, this, channelSuffix)
+    }
+
+    private fun meshArguments(call: MethodCall): Map<*, *> =
+        call.arguments as? Map<*, *>
+            ?: throw IllegalArgumentException("Mesh arguments must be a map.")
+
+    private fun readNumberList(value: Any?, label: String): List<Double> =
+        (value as? List<*>)?.map { item ->
+            (item as? Number)?.toDouble()
+                ?: throw IllegalArgumentException("$label must contain only numbers.")
+        } ?: throw IllegalArgumentException("$label is missing.")
+
+    private fun readIndexList(value: Any?): List<Int> =
+        (value as? List<*>)?.map { item ->
+            val number = item as? Number
+                ?: throw IllegalArgumentException("Mesh indices must contain integers.")
+            val index = number.toInt()
+            if (number.toDouble() != index.toDouble()) {
+                throw IllegalArgumentException("Mesh indices must contain integers.")
+            }
+            index
+        } ?: throw IllegalArgumentException("Mesh indices are missing.")
+
+    private fun validateMeshBuffers(
+        positions: List<Double>,
+        indices: List<Int>,
+        transform: List<Double>,
+    ) {
+        if (positions.size < 12 || positions.size % 3 != 0 ||
+            positions.size / 3 > 25000 ||
+            indices.isEmpty() || indices.size % 3 != 0 ||
+            indices.size > 150000 ||
+            positions.any { !it.isFinite() } ||
+            indices.any { it < 0 || it >= positions.size / 3 } ||
+            transform.size != 16 || transform.any { !it.isFinite() }) {
+            throw IllegalArgumentException("Mesh buffers or transform are invalid or exceed mobile limits.")
+        }
+        val sx = kotlin.math.sqrt(
+            transform[0] * transform[0] +
+                transform[1] * transform[1] +
+                transform[2] * transform[2],
+        )
+        val sy = kotlin.math.sqrt(
+            transform[4] * transform[4] +
+                transform[5] * transform[5] +
+                transform[6] * transform[6],
+        )
+        val sz = kotlin.math.sqrt(
+            transform[8] * transform[8] +
+                transform[9] * transform[9] +
+                transform[10] * transform[10],
+        )
+        if (sx <= 1e-6 || sy <= 1e-6 || sz <= 1e-6) {
+            throw IllegalArgumentException("Mesh transform must be invertible.")
+        }
+    }
+
+    private fun buildDeformableVertices(
+        positions: List<Double>,
+        indices: List<Int>,
+    ): List<Geometry.Vertex> {
+        val count = positions.size / 3
+        val normals = Array(count) { FloatArray(3) }
+        for (i in indices.indices step 3) {
+            val a = indices[i]
+            val b = indices[i + 1]
+            val c = indices[i + 2]
+            val abx = positions[b * 3] - positions[a * 3]
+            val aby = positions[b * 3 + 1] - positions[a * 3 + 1]
+            val abz = positions[b * 3 + 2] - positions[a * 3 + 2]
+            val acx = positions[c * 3] - positions[a * 3]
+            val acy = positions[c * 3 + 1] - positions[a * 3 + 1]
+            val acz = positions[c * 3 + 2] - positions[a * 3 + 2]
+            val nx = (aby * acz - abz * acy).toFloat()
+            val ny = (abz * acx - abx * acz).toFloat()
+            val nz = (abx * acy - aby * acx).toFloat()
+            for (vertex in intArrayOf(a, b, c)) {
+                normals[vertex][0] += nx
+                normals[vertex][1] += ny
+                normals[vertex][2] += nz
+            }
+        }
+        return List(count) { index ->
+            val normal = normals[index]
+            val length = kotlin.math.sqrt(
+                normal[0] * normal[0] +
+                    normal[1] * normal[1] +
+                    normal[2] * normal[2],
+            )
+            val inverseLength = if (length > 1e-8f) 1f / length else 1f
+            Geometry.Vertex(
+                position = Position(
+                    positions[index * 3].toFloat(),
+                    positions[index * 3 + 1].toFloat(),
+                    positions[index * 3 + 2].toFloat(),
+                ),
+                normal = Direction(
+                    normal[0] * inverseLength,
+                    normal[1] * inverseLength,
+                    normal[2] * inverseLength,
+                ),
+            )
+        }
+    }
+
+    private fun applyDeformableTransform(node: GeometryNode, values: List<Double>) {
+        node.position = Position(
+            values[12].toFloat(),
+            values[13].toFloat(),
+            values[14].toFloat(),
+        )
+        node.rotation = Rotation(
+            x = kotlin.math.atan2(values[6].toFloat(), values[10].toFloat()),
+            y = kotlin.math.atan2(
+                -values[2].toFloat(),
+                kotlin.math.sqrt(
+                    values[6].toFloat() * values[6].toFloat() +
+                        values[10].toFloat() * values[10].toFloat(),
+                ),
+            ),
+            z = kotlin.math.atan2(values[1].toFloat(), values[0].toFloat()),
+        )
+        node.scale = Scale(
+            x = kotlin.math.sqrt(
+                (values[0] * values[0] + values[1] * values[1] + values[2] * values[2]).toFloat(),
+            ),
+            y = kotlin.math.sqrt(
+                (values[4] * values[4] + values[5] * values[5] + values[6] * values[6]).toFloat(),
+            ),
+            z = kotlin.math.sqrt(
+                (values[8] * values[8] + values[9] * values[9] + values[10] * values[10]).toFloat(),
+            ),
+        )
+    }
+
+    private fun addDeformableMesh(call: MethodCall): Boolean {
+        val args = meshArguments(call)
+        val id = args["id"] as? String
+            ?: throw IllegalArgumentException("Mesh id is missing.")
+        if (id.isBlank() || deformableNodes.containsKey(id)) {
+            throw IllegalArgumentException("Mesh id is empty or already exists.")
+        }
+        val positions = readNumberList(args["positions"], "positions")
+        val indices = readIndexList(args["indices"])
+        val transform = readNumberList(args["transform"], "transform")
+        validateMeshBuffers(positions, indices, transform)
+        val vertices = buildDeformableVertices(positions, indices)
+        val geometry = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
+            .vertices(vertices)
+            .indices(indices)
+            .build(sceneView.engine)
+        val color = (args["color"] as? Number)?.toInt() ?: 0xFF0A8F83.toInt()
+        val metallic = ((args["metallic"] as? Number)?.toFloat() ?: 0.05f).coerceIn(0f, 1f)
+        val roughness = ((args["roughness"] as? Number)?.toFloat() ?: 0.72f).coerceIn(0f, 1f)
+        val material = sceneView.materialLoader.createColorInstance(color, metallic, roughness)
+        val node = GeometryNode(sceneView.engine, geometry, material).apply {
+            name = id
+        }
+        applyDeformableTransform(node, transform)
+        sceneView.addChildNode(node)
+        deformableNodes[id] = node
+        deformableIndices[id] = indices
+        return true
+    }
+
+    private fun updateDeformableMesh(call: MethodCall) {
+        val args = meshArguments(call)
+        val id = args["id"] as? String
+            ?: throw IllegalArgumentException("Mesh id is missing.")
+        val node = deformableNodes[id]
+            ?: throw IllegalArgumentException("Deformable mesh $id was not found.")
+        val positions = readNumberList(args["positions"], "positions")
+        val indices = deformableIndices[id]
+            ?: throw IllegalStateException("Deformable mesh topology is missing.")
+        val transform = readNumberList(args["transform"], "transform")
+        if (positions.size != node.geometry.vertices.size * 3) {
+            throw IllegalArgumentException("Deformable mesh vertex count cannot change during an update.")
+        }
+        validateMeshBuffers(positions, indices, transform)
+        node.updateGeometry(buildDeformableVertices(positions, indices), listOf(indices))
+        applyDeformableTransform(node, transform)
+    }
+
+    private fun removeDeformableMesh(call: MethodCall) {
+        val args = meshArguments(call)
+        val id = args["id"] as? String
+            ?: throw IllegalArgumentException("Mesh id is missing.")
+        val node = deformableNodes.remove(id) ?: return
+        deformableIndices.remove(id)
+        sceneView.removeChildNode(node)
+        node.destroy()
     }
 
     private suspend fun disableCameraImpl() {
@@ -1001,12 +1217,19 @@ class ArView(
         isTornDown = true
         Log.i(TAG, "dispose: viewId=$viewId lifecycleState=${lifecycle.currentState}")
         scanChannel.setMethodCallHandler(null)
+        meshChannel.setMethodCallHandler(null)
         pendingScanResult?.let { it.error("SESSION_DISPOSED", "AR view disposed", null) }
         pendingScanResult = null
         ARSessionHostApi.setUp(messenger, null, channelSuffix)
         ARObjectHostApi.setUp(messenger, null, channelSuffix)
         ARAnchorHostApi.setUp(messenger, null, channelSuffix)
         nodesMap.clear()
+        deformableNodes.values.toList().forEach { node ->
+            sceneView.removeChildNode(node)
+            node.destroy()
+        }
+        deformableNodes.clear()
+        deformableIndices.clear()
         sceneView.destroy()
         pointCloudNodes.toList().forEach { removePointCloudNode(it) }
         pointCloudModelInstances.clear()
