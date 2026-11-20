@@ -97,13 +97,17 @@ Validation: at least two finite points; no zero-length segments; positive finite
 
 ## Collision filter bridge invariants
 
-- A GroupFilterTable is owned by exactly one JjWorld and remains alive until every body referencing it has been restored or destroyed.
-- Every C API operation holds the existing registry mutex; this serializes it against jj_world_step and world/body teardown. No filter mutation is allowed from a Jolt worker callback.
-- Resolve both body handles and verify same-world ownership before touching either body.
-- Preserve each body's full prior CollisionGroup (filter pointer, GroupID, SubGroupID) before first assignment; restore that exact value on reset, pair release, group destruction, body teardown, and world teardown.
-- Only the registered pair is disabled/enabled. Unregistered bodies keep their prior groups; default/invalid-group environment bodies continue to collide normally.
-- After changing a body's group or a table entry, invalidate its contact cache and activate eligible bodies. Verify the next fixed step ends/recreates the contact correctly. Do not assume a broad-phase rebuild alone updates narrow-phase contacts.
-- Group/table destruction is idempotent and generation-checked; stale handles are harmless.
+- A `GroupFilterTable` is owned by exactly one `JjWorld` and remains alive until every body referencing it has been restored or destroyed.
+- Jolt's `GroupFilterTable::CanCollide` semantics are part of the contract: different GroupIDs collide; equal GroupIDs with different `GroupFilter*` pointers do not collide; equal GroupIDs and equal filter pointers defer to SubGroupIDs and the table. Equal SubGroupIDs never collide.
+- The pair bridge therefore assigns both target bodies the same bridge-owned GroupID and the same table pointer, with distinct SubGroupIDs (0 and 1). The table has exactly two subgroups. The bridge must reserve a GroupID not currently used by any body in the world; a collision with an existing GroupID could suppress an unrelated body's collision if its filter pointer differs.
+- The bridge must reject or explicitly serialize overlapping active pair leases that would require one body to hold multiple temporary CollisionGroups. The initial ABI should reject a second active lease for either already-leased body rather than silently overwrite its saved state.
+- Save each complete prior `CollisionGroup` (filter pointer, GroupID, SubGroupID) and retain a `Ref<GroupFilter>` for any non-null prior filter while that state is saved. `CollisionGroup` itself stores a raw filter pointer; copying the value alone does not keep that filter alive.
+- Every C API operation holds the existing registry mutex; this serializes it against `jj_world_step` and world/body teardown. No filter mutation is allowed from a Jolt worker callback.
+- Resolve both body handles and verify same-world ownership before reading or changing either body's group.
+- Restore the exact saved group before releasing the pair's table reference on reset, pair release, body teardown, and world teardown. Body destruction must release its pair lease and restore the surviving partner before the destroyed body's storage is reclaimed.
+- Only the registered pair is assigned the bridge GroupID/table. Unregistered bodies keep their prior groups; default/invalid-group environment bodies continue to collide normally.
+- After changing either body's group or the table entry, call `BodyInterface::InvalidateContactCache` for both bodies and activate eligible bodies through `ActivateBodies`. The next fixed step must verify the expected contact transition; a broad-phase rebuild alone is not a substitute.
+- Group/table destruction is idempotent and generation-checked; stale handles are harmless. The table must not be released while any body's CollisionGroup still contains its pointer.
 
 ## Ten-stage execution and acceptance gates
 
