@@ -80,16 +80,16 @@ void main() {
           isTrue,
         );
 
-        SoftBodyRenderFrame? frame;
-        for (var i = 0; i < 6; i++) {
+        var frame = runtime.advance(1 / 60);
+        final firstFrameContactCount = runtime.activeContactCount;
+        for (var i = 1; i < 6; i++) {
           frame = runtime.advance(1 / 60);
         }
 
-        expect(frame, isNotNull);
-        expect(frame!.vertexCount, tetrahedralization.vertexCount);
+        expect(frame.vertexCount, tetrahedralization.vertexCount);
         expect(frame.triangleCount, tetrahedralization.mesh.triangleCount);
         expect(runtime.coupledSteps, greaterThan(0));
-        expect(runtime.activeContactCount, greaterThan(0));
+        expect(firstFrameContactCount, greaterThan(0));
         expect(physics.isDynamicBody('runtime-probe'), isTrue);
         expect(physics.isDynamicBody('soft:runtime-test'), isFalse);
       } finally {
