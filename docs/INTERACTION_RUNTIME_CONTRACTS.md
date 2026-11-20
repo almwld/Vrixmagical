@@ -122,4 +122,17 @@ Validation: at least two finite points; no zero-length segments; positive finite
 9. **Integrate MediaPipe and ARCore** — timestamp synchronization, confidence/staleness handling, world-anchor conversion, tracking-loss recovery and privacy-safe processing.
 10. **Profile LG V60 and LG Wing** — measure frame-time percentiles, physics/IK/XPBD cost, memory, thermal throttling, battery and tracking latency in repeatable scenes. Record actual device/OS/build/config and baseline; 60 FPS is a target, not a pass until measured.
 
+
+### Native handle-layout constraint discovered during implementation review
+
+The current opaque object handle layout reserves exactly two type bits in `objectTag` (generation at bit 18, type at bits 16–17, world slot in the low 16 bits). The existing values 1, 2 and 3 are already assigned to bodies, joints and characters. A collision-pair handle must **not** be introduced as type 4 without redesigning the encoding: that value would spill into the generation field and could alias or invalidate unrelated handles.
+
+Before adding the pair ABI, choose and test one explicit representation:
+- allocate a collision-pair registry in the world and use a deliberately reserved type value only if the full `findOwner`/tag validation path proves it cannot alias an existing object kind; or
+- revise the object-tag bit allocation for every object kind together, with regression tests proving old/stale/cross-world handles are rejected consistently.
+
+The preferred minimal change is to avoid changing the public encoding for existing body/joint/character handles. The pair registry must still use generation/sequence checks and remain world-owned. Do not assume the unused numeric value zero is safe until `findOwner`, Dart-side handle validation, and all tag consumers have been inspected.
+
+This is a pre-implementation safety gate, not evidence that the collision-pair ABI exists.
+
 No stage is considered complete merely because code or a build artifact exists; each stage closes only when its acceptance gate is recorded.
