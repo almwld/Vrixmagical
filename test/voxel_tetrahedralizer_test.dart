@@ -14,6 +14,9 @@ void main() {
       expect(result.vertexCount, 8);
       expect(result.boundaryFaceCount, 12);
       expect(result.mesh.triangleCount, 12);
+      expect(result.worldOrigin.x, closeTo(0.5, 1e-9));
+      expect(result.worldOrigin.y, closeTo(0.5, 1e-9));
+      expect(result.worldOrigin.z, closeTo(0.5, 1e-9));
       expect(result.mesh.positions.fold<double>(0, (a, b) => a + b) / result.mesh.positions.length, closeTo(0, 1e-9));
       result.validateQuality();
     });
@@ -27,6 +30,9 @@ void main() {
       expect(result.tetrahedronCount, 12);
       expect(result.vertexCount, 12);
       expect(result.boundaryFaceCount, 20);
+      expect(result.worldOrigin.x, closeTo(1.0, 1e-9));
+      expect(result.worldOrigin.y, closeTo(0.5, 1e-9));
+      expect(result.worldOrigin.z, closeTo(0.5, 1e-9));
       result.validateQuality();
     });
 
