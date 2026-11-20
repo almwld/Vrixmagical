@@ -88,12 +88,11 @@ class ArHandXpbdBridge {
 
     final state = driver.readState();
     final claimedVertices = <int>{};
-    final seenHands = <String>{};
+    final updatedHands = <String>{};
 
     for (final hand in observation.hands) {
       final key = hand.handedness;
       if (key.isEmpty || key == 'Unknown') continue;
-      seenHands.add(key);
       if (!hand.isPinching || hand.indexTipWorld == null) continue;
 
       final localTarget = inverse.transform3(hand.indexTipWorld!.clone());
@@ -119,16 +118,14 @@ class ArHandXpbdBridge {
         ],
         compliance: compliance,
       );
+      updatedHands.add(key);
     }
 
+    // Keep a constraint only when this frame supplied a valid, finite target.
+    // A detected pinch with invalid depth/coordinates must not leave the last
+    // native target active indefinitely.
     for (final key in _activeTargets.keys.toList(growable: false)) {
-      if (seenHands.contains(key)) {
-        final hand = observation.hands.where((item) => item.handedness == key);
-        if (hand.isNotEmpty && hand.first.isPinching &&
-            hand.first.indexTipWorld != null) {
-          continue;
-        }
-      }
+      if (updatedHands.contains(key)) continue;
       final vertex = _activeTargets.remove(key);
       if (vertex != null) driver.clearPointTarget(vertexIndex: vertex);
     }
