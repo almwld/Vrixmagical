@@ -70,6 +70,7 @@ class CoupledSoftBodyPhysics {
   bool _disposed = false;
   int _coupledSteps = 0;
   final Vector3 _lastAppliedReactionImpulse = Vector3.zero();
+  final Vector3 _lastContactNormalWorld = Vector3.zero();
   int _lastAppliedReactionCount = 0;
 
   int get coupledSteps => _coupledSteps;
@@ -77,6 +78,7 @@ class CoupledSoftBodyPhysics {
   int get lastAppliedReactionCount => _lastAppliedReactionCount;
   Vector3 get lastAppliedReactionImpulse =>
       Vector3.copy(_lastAppliedReactionImpulse);
+  Vector3 get lastContactNormalWorld => Vector3.copy(_lastContactNormalWorld);
 
   /// Advances one frame in a deterministic order. Jolt detects contacts first;
   /// XPBD solves those constraints second; XPBD reactions feed Jolt on its next
@@ -125,6 +127,7 @@ class CoupledSoftBodyPhysics {
     final hits = scene.overlapBody(proxyBodyId, includeSensors: false)
       ..sort((a, b) => (a.bodyId ?? '').compareTo(b.bodyId ?? ''));
     final nextContacts = <int, _ActiveContact>{};
+    _lastContactNormalWorld.setZero();
 
     for (final hit in hits) {
       final otherBody = hit.bodyId;
@@ -158,6 +161,7 @@ class CoupledSoftBodyPhysics {
         localPoint: localPoint,
         localNormal: localNormal,
       );
+      _lastContactNormalWorld.setFrom(hit.normal);
     }
 
     // The native XPBD contract stores one contact per vertex. Clear contacts
