@@ -399,7 +399,7 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     }
 
     final radius = ((maxY - minY) * 0.05).clamp(0.015, 0.05).toDouble();
-    final dropGap = math.max(0.04, radius * 2);
+    final dropGap = math.max(0.04, radius * 2).toDouble();
     final localPosition = Vector3(topX, maxY + radius + dropGap, topZ);
     final worldPosition = runtime.worldTransform.transform3(localPosition);
     final probeId =
