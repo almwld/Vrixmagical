@@ -20,6 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate unified AI delegation and memory
+        run: python3 tool/validate_ai_handoff.py
+
       - name: Native XPBD solver regression
         run: |
           cmake -S packages/vrix_soft_body/android/src/main/cpp -B /tmp/vrix-soft-body-native \

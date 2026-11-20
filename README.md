@@ -73,3 +73,7 @@ This generates the Flutter Android host and configures compileSdk 36, minSdk 29,
 ## Privacy
 
 Camera frames are processed locally by default. The app does not upload camera frames to a server. The sample GLB model is fetched from the Khronos public sample-assets repository when placed; replace it with bundled/licensed assets for offline production use.
+
+## AI delegation and durable project memory
+
+Repository-wide agent collaboration uses one orchestrator, registry-backed skills/playbooks and concise durable handoffs. Read AI_TEAM.md; current project state and decisions live under .ai/. CI validates the registry with python3 tool/validate_ai_handoff.py.
