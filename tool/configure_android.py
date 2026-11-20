@@ -65,7 +65,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         flutterEngine.platformViewsController.registry.registerViewFactory(
             "virxmagical/splat_view",
-            SplatKitViewFactory(),
+            SplatKitViewFactory(flutterEngine.dartExecutor.binaryMessenger),
         )
         wingDeck = LgWingDeckController(this, flutterEngine)
     }
@@ -321,20 +321,33 @@ native_view = Path("android/app/src/main/kotlin/com/virxmagical/virxmagical/Spla
 native_view.write_text("""package com.virxmagical.virxmagical
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.widget.FrameLayout
+import com.splatkit.CameraPose
+import com.splatkit.RenderPolicy
+import com.splatkit.RenderQuality
+import com.splatkit.SortDepth
+import com.splatkit.SplatStats
 import com.splatkit.SplatSurfaceView
+import com.splatkit.WorldPoint
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import io.flutter.plugin.common.StandardMessageCodec
 import java.io.File
 import java.util.concurrent.CopyOnWriteArraySet
 
-class SplatKitViewFactory : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+class SplatKitViewFactory(
+    private val messenger: BinaryMessenger,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         @Suppress("UNCHECKED_CAST")
         val params = args as? Map<String, Any?> ?: emptyMap()
-        return SplatKitPlatformView(context, params)
+        return SplatKitPlatformView(context, viewId, params, messenger)
     }
 }
 
@@ -359,10 +372,17 @@ internal object SplatKitViewRegistry {
 
 private class SplatKitPlatformView(
     context: Context,
+    viewId: Int,
     params: Map<String, Any?>,
+    messenger: BinaryMessenger,
 ) : PlatformView {
     private val container = FrameLayout(context)
     private val splatView = SplatSurfaceView(context)
+    private val channel = MethodChannel(messenger, "virxmagical/splat_view/$viewId")
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val pendingEvents = mutableListOf<Map<String, Any?>>()
+    private var dartAttached = false
+    @Volatile private var disposed = false
 
     init {
         container.addView(
@@ -373,19 +393,308 @@ private class SplatKitPlatformView(
             ),
         )
         SplatKitViewRegistry.add(splatView)
+        splatView.listener = object : SplatSurfaceView.Listener {
+            override fun onWorldReady(splatCount: Int) =
+                emit("worldReady", mapOf("splatCount" to splatCount))
+            override fun onWorldFrameReady(splatCount: Int) =
+                emit("worldFrameReady", mapOf("splatCount" to splatCount))
+            override fun onGpuFailed(message: String) =
+                emit("gpuFailed", mapOf("message" to message))
+            override fun onWorldFailed(message: String) =
+                emit("worldFailed", mapOf("message" to message))
+            override fun onColliderReady() = emit("colliderReady")
+            override fun onColliderFailed(message: String) =
+                emit("colliderFailed", mapOf("message" to message))
+        }
+        splatView.cameraPoseIntervalMillis = 250
+        splatView.cameraPoseListener = { pose ->
+            emit("cameraPose", poseMap(pose))
+        }
+        channel.setMethodCallHandler(::handleMethodCall)
+
         val path = params["worldPath"] as? String
+        val kind = params["worldKind"] as? String
         if (!path.isNullOrBlank()) {
-            val world = File(path)
-            if (world.isFile) splatView.loadWorld(world)
+            loadWorld(path, kind)
         }
     }
 
     override fun getView(): View = container
 
+    private fun emit(type: String, values: Map<String, Any?> = emptyMap()) {
+        val event = HashMap<String, Any?>(values)
+        event["type"] = type
+        mainHandler.post {
+            if (disposed) return@post
+            if (dartAttached) {
+                channel.invokeMethod("event", event)
+            } else {
+                pendingEvents.add(event)
+            }
+        }
+    }
+
+    private fun handleMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            when (call.method) {
+                "attach" -> {
+                    dartAttached = true
+                    pendingEvents.toList().forEach { channel.invokeMethod("event", it) }
+                    pendingEvents.clear()
+                    result.success(deviceInfo())
+                }
+                "getDeviceInfo" -> result.success(deviceInfo())
+                "readStats" -> result.success(statsMap(splatView.readStats()))
+                "getCameraPose" -> result.success(poseMap(splatView.cameraPose))
+                "setCameraPose" -> {
+                    val args = arguments(call)
+                    splatView.cameraPose = CameraPose(
+                        requiredFloat(args, "x"),
+                        requiredFloat(args, "y"),
+                        requiredFloat(args, "z"),
+                        optionalFloat(args, "yaw", 0f),
+                        optionalFloat(args, "pitch", 0f),
+                    )
+                    result.success(true)
+                }
+                "setMotionEnabled" -> {
+                    splatView.setMotionEnabled(call.argument<Boolean>("enabled") ?: false)
+                    result.success(splatView.isMotionEnabled)
+                }
+                "applyQuality" -> {
+                    val name = call.argument<String>("preset") ?: "medium"
+                    val quality = RenderQuality.named(name)
+                        ?: throw IllegalArgumentException("Unknown quality preset: $name")
+                    splatView.applyQuality(quality)
+                    result.success(true)
+                }
+                "setRenderScale" -> {
+                    splatView.renderScale = requiredFloat(arguments(call), "value")
+                    result.success(true)
+                }
+                "setShDegree" -> {
+                    splatView.shDegree = requiredInt(arguments(call), "value")
+                    result.success(true)
+                }
+                "setMaxFramesPerSecond" -> {
+                    val value = (arguments(call)["value"] as? Number)?.toFloat()
+                    splatView.maxFramesPerSecond = value
+                    result.success(true)
+                }
+                "orbit" -> result.success(
+                    splatView.orbit(
+                        requiredFloat(arguments(call), "azimuth"),
+                        requiredFloat(arguments(call), "elevation"),
+                    ),
+                )
+                "dolly" -> result.success(
+                    splatView.dolly(requiredFloat(arguments(call), "delta")),
+                )
+                "focus" -> result.success(
+                    splatView.focus(
+                        requiredFloat(arguments(call), "x"),
+                        requiredFloat(arguments(call), "y"),
+                    ),
+                )
+                "look" -> {
+                    splatView.look(
+                        requiredFloat(arguments(call), "yaw"),
+                        requiredFloat(arguments(call), "pitch"),
+                    )
+                    result.success(true)
+                }
+                "setAnchor" -> {
+                    val args = arguments(call)
+                    splatView.setAnchor(
+                        WorldPoint(
+                            requiredFloat(args, "x"),
+                            requiredFloat(args, "y"),
+                            requiredFloat(args, "z"),
+                        ),
+                    )
+                    result.success(true)
+                }
+                "setWalkVelocity" -> {
+                    splatView.setWalkVelocity(
+                        requiredFloat(arguments(call), "forward"),
+                        requiredFloat(arguments(call), "right"),
+                    )
+                    result.success(true)
+                }
+                "loadCollider" -> {
+                    val file = requiredFile(arguments(call), "path")
+                    splatView.loadCollider(file)
+                    result.success(true)
+                }
+                "loadTiledWorld" -> {
+                    val file = requiredFile(arguments(call), "path")
+                    splatView.loadTiledWorld(file)
+                    result.success(true)
+                }
+                "loadWorld" -> {
+                    val args = arguments(call)
+                    loadWorld(requiredString(args, "path"), args["kind"] as? String)
+                    result.success(true)
+                }
+                "applyRenderPolicy" -> {
+                    val args = arguments(call)
+                    val policyArgs = args["policy"] as? Map<*, *>
+                        ?: throw IllegalArgumentException("policy map is required")
+                    val sortWire = optionalInt(policyArgs, "sortDepth", 16)
+                    val sortDepth = SortDepth.fromWire(sortWire)
+                        ?: throw IllegalArgumentException("sortDepth must be 16 or 32")
+                    val policy = RenderPolicy(
+                        lodErrorPixels = optionalFloat(policyArgs, "lodErrorPixels", 1f),
+                        lodSplatLimit = optionalInt(policyArgs, "lodSplatLimit", 0),
+                        alphaThreshold = optionalFloat(policyArgs, "alphaThreshold", 1f / 255f),
+                        subpixelThreshold = optionalFloat(policyArgs, "subpixelThreshold", 1f),
+                        enableFrustumCulling = optionalBoolean(policyArgs, "enableFrustumCulling", true),
+                        enableHiZOcclusion = optionalBoolean(policyArgs, "enableHiZOcclusion", false),
+                        enableEarlyTermination = optionalBoolean(policyArgs, "enableEarlyTermination", true),
+                        sortDepth = sortDepth,
+                    )
+                    splatView.applyRenderPolicy(policy) { resolution ->
+                        result.success(
+                            mapOf(
+                                "accepted" to resolution.accepted,
+                                "preparationFailed" to resolution.preparationFailed,
+                                "error" to resolution.error,
+                                "warnings" to resolution.warnings,
+                            ),
+                        )
+                    }
+                }
+                "startBenchmark" -> {
+                    splatView.startBenchmark(optionalFloat(arguments(call), "seconds", 10f))
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        } catch (error: Throwable) {
+            result.error("SPLAT_VIEW_ERROR", error.message ?: error.javaClass.simpleName, null)
+        }
+    }
+
+    private fun loadWorld(path: String, kind: String?) {
+        val file = File(path)
+        if (!file.isFile || !file.canRead()) {
+            emit("worldFailed", mapOf("message" to "World file is missing or unreadable: $path"))
+            return
+        }
+        try {
+            if (kind == "tiled" || file.extension.equals("json", ignoreCase = true)) {
+                splatView.loadTiledWorld(file)
+            } else {
+                splatView.loadWorld(file)
+            }
+        } catch (error: Throwable) {
+            emit("worldFailed", mapOf("message" to (error.message ?: "World load failed")))
+        }
+    }
+
+    private fun deviceInfo(): Map<String, Any?> = mapOf(
+        "isAvailable" to splatView.isAvailable,
+        "gpuDescription" to splatView.gpuDescription,
+        "cameraPose" to poseMap(splatView.cameraPose),
+        "motionEnabled" to splatView.isMotionEnabled,
+        "capabilities" to capabilitiesMap(),
+    )
+
+    private fun capabilitiesMap(): Map<String, Any?>? {
+        val capabilities = splatView.deviceCapabilities ?: return null
+        val limits = capabilities.limits
+        val support = capabilities.policy
+        return mapOf(
+            "maxLodCapacitySplats" to limits.maxLodCapacitySplats,
+            "minResidencyCapacitySplats" to limits.minResidencyCapacitySplats,
+            "maxResidencyCapacitySplats" to limits.maxResidencyCapacitySplats,
+            "supportsHiZOcclusion" to capabilities.supportsHiZOcclusion,
+            "supportsSubgroups" to capabilities.supportsSubgroups,
+            "maxTextureDimension" to capabilities.maxTextureDimension,
+            "policySupport" to mapOf(
+                "lodErrorPixels" to support.lodErrorPixels,
+                "alphaThreshold" to support.alphaThreshold,
+                "subpixelThreshold" to support.subpixelThreshold,
+                "enableFrustumCulling" to support.enableFrustumCulling,
+                "enableHiZOcclusion" to support.enableHiZOcclusion,
+                "enableEarlyTermination" to support.enableEarlyTermination,
+                "sortDepth" to support.sortDepth,
+                "lodSplatLimit" to support.lodSplatLimit,
+                "minLodErrorPixels" to support.minLodErrorPixels,
+                "maxLodErrorPixels" to support.maxLodErrorPixels,
+                "minSubpixelThreshold" to support.minSubpixelThreshold,
+                "maxSubpixelThreshold" to support.maxSubpixelThreshold,
+            ),
+        )
+    }
+
+    private fun statsMap(stats: SplatStats): Map<String, Any> = mapOf(
+        "fps" to stats.fps,
+        "frameMillis" to stats.frameMillis,
+        "gpuMillis" to stats.gpuMillis,
+        "sortMillis" to stats.sortMillis,
+        "loadedSplats" to stats.loadedSplatCount,
+        "drawnSplats" to stats.drawnSplatCount,
+        "loadedShDegree" to stats.loadedShDegree,
+        "walking" to stats.walking,
+        "motion" to stats.motion,
+    )
+
+    private fun poseMap(pose: CameraPose): Map<String, Any> = mapOf(
+        "x" to pose.x,
+        "y" to pose.y,
+        "z" to pose.z,
+        "yaw" to pose.yaw,
+        "pitch" to pose.pitch,
+    )
+
+    private fun arguments(call: MethodCall): Map<*, *> =
+        call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+
+    private fun requiredString(args: Map<*, *>, key: String): String =
+        (args[key] as? String)?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("$key is required")
+
+    private fun requiredFile(args: Map<*, *>, key: String): File {
+        val file = File(requiredString(args, key))
+        require(file.isFile && file.canRead()) { "$key is missing or unreadable" }
+        return file
+    }
+
+    private fun requiredFloat(args: Map<*, *>, key: String): Float {
+        val value = (args[key] as? Number)?.toFloat()
+            ?: throw IllegalArgumentException("$key must be numeric")
+        require(value.isFinite()) { "$key must be finite" }
+        return value
+    }
+
+    private fun optionalFloat(args: Map<*, *>, key: String, default: Float): Float {
+        val value = (args[key] as? Number)?.toFloat() ?: default
+        require(value.isFinite()) { "$key must be finite" }
+        return value
+    }
+
+    private fun requiredInt(args: Map<*, *>, key: String): Int =
+        (args[key] as? Number)?.toInt()
+            ?: throw IllegalArgumentException("$key must be an integer")
+
+    private fun optionalInt(args: Map<*, *>, key: String, default: Int): Int =
+        (args[key] as? Number)?.toInt() ?: default
+
+    private fun optionalBoolean(args: Map<*, *>, key: String, default: Boolean): Boolean =
+        args[key] as? Boolean ?: default
+
     override fun dispose() {
+        disposed = true
+        channel.setMethodCallHandler(null)
+        splatView.cameraPoseListener = null
+        splatView.listener = null
+        splatView.setMotionEnabled(false)
         SplatKitViewRegistry.remove(splatView)
         splatView.release()
+        pendingEvents.clear()
     }
 }
 """)
+
 print("Configured Android host for SplatKit (API 29+, arm64-v8a, Vulkan runtime).")
