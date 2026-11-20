@@ -1,4 +1,5 @@
 import 'package:vector_math/vector_math_64.dart';
+import 'package:vrix_soft_body/vrix_soft_body.dart';
 
 import '../domain/soft_body_contract.dart';
 import 'ar_session_hand_perception.dart';
