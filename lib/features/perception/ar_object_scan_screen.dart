@@ -59,7 +59,6 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   VrixSoftBodySceneRuntime? _softBodyRuntime;
   SoftBodyRenderFrame? _softBodyFrame;
   Matrix4? _softBodyWorldTransform;
-  String? _probeBodyId;
   ArSessionHandPerception? _handPerception;
   ArHandXpbdBridge? _handXpbdBridge;
   bool _handInteractionEnabled = false;
@@ -554,7 +553,6 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
       restitution: 0,
       continuous: true,
     );
-    _probeBodyId = probeId;
   }
 
   void _uploadDeformableMeshFrame(List<double> positions) {
