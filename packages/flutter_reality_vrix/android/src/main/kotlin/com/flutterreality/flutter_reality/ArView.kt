@@ -27,7 +27,7 @@ import com.google.ar.core.Frame
 import com.google.ar.core.Plane
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
-import com.flutterreality.flutter_reality.Serialization.deserializeMatrix4
+import com.flutterreality.flutter_reality.Serialization.deserializeArCorePose
 import com.flutterreality.flutter_reality.Serialization.serializePose
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
@@ -851,22 +851,13 @@ class ArView(
     override suspend fun addAnchor(anchor: AnchorMessage): Boolean {
         if (anchor.type.toInt() != 0) return false // only plane anchors are supported
         return try {
-            val transform = ArrayList(anchor.transformation)
-            val (position, rotation) = deserializeMatrix4(transform)
-
-            val pose = Pose(
-                floatArrayOf(position.x, position.y, position.z),
-                floatArrayOf(rotation.x, rotation.y, rotation.z, 1f),
-            )
-
+            val pose = deserializeArCorePose(anchor.transformation)
             val arAnchor = sceneView.session?.createAnchor(pose) ?: return false
-            val anchorNode = AnchorNode(sceneView.engine, arAnchor)
-            try {
-                anchorNode.transform = Transform(position = position, rotation = rotation)
-            } catch (e: Exception) {
-                Log.w(TAG, "Transform warning suppressed: ${e.message}")
-            }
 
+            // AnchorNode owns the anchor's world pose and continuously follows
+            // ARCore tracking updates. Do not overwrite it with a second local
+            // transform; doing so applies the placement transform twice.
+            val anchorNode = AnchorNode(sceneView.engine, arAnchor)
             sceneView.addChildNode(anchorNode)
             anchorNodesMap[anchor.name] = anchorNode
             true
