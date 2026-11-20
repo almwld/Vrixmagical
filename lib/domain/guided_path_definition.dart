@@ -117,15 +117,15 @@ class GuidedPathDefinition {
     final directionAllowed = permittedDirection == GuidedPathDirection.both ||
         (permittedDirection == GuidedPathDirection.forward && travelDirection > 0) ||
         (permittedDirection == GuidedPathDirection.reverse && travelDirection < 0);
-    final phase = !directionAllowed
-        ? GuidedPathPhase.disallowedDirection
-        : !fits
-            ? GuidedPathPhase.outside
+    final phase = !fits
+        ? GuidedPathPhase.outside
+        : !directionAllowed
+            ? GuidedPathPhase.disallowedDirection
             : inEntryZone
-            ? GuidedPathPhase.entry
-            : inExitZone
-                ? GuidedPathPhase.exit
-                : GuidedPathPhase.inside;
+                ? GuidedPathPhase.entry
+                : inExitZone
+                    ? GuidedPathPhase.exit
+                    : GuidedPathPhase.inside;
 
     return GuidedPathProjection(
       pathId: id,
