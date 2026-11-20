@@ -12,11 +12,11 @@ import 'package:flutter_reality/managers/ar_session_manager.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mediapipe_vision/mediapipe_vision.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:vrix_soft_body/vrix_soft_body.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 import '../../app/app_theme.dart';
 import '../../domain/captured_frame.dart';
+import '../../domain/soft_body_scene_runtime.dart';
 import '../../services/object_scan_store.dart';
 import '../../services/object_scan_reconstruction_service.dart';
 import '../../services/physics_scene_service.dart';
@@ -56,9 +56,10 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
   bool _saved = false;
   bool _completed = false;
   PhysicsSceneService? _physicsScene;
-  VrixSoftBodyFfiEngine? _softBodyEngine;
-  SoftBodyHandle? _softBodyHandle;
+  VrixSoftBodySceneRuntime? _softBodyRuntime;
+  SoftBodyRenderFrame? _softBodyFrame;
   Matrix4? _softBodyWorldTransform;
+  String? _probeBodyId;
   ArSessionHandPerception? _handPerception;
   ArHandXpbdBridge? _handXpbdBridge;
   bool _handInteractionEnabled = false;
@@ -379,112 +380,160 @@ class _ArObjectScanScreenState extends State<ArObjectScanScreen> {
     setState(() {
       _busy = true;
       _error = null;
-      _status = 'جارٍ دمج بيانات RGB-D وإعادة بناء السطح وتصدير GLB…';
+      _status = 'جارٍ دمج RGB-D وبناء XPBD وربطه بتصادمات Jolt وتجهيز سطح AR…';
     });
+
+    final physics = PhysicsSceneService();
+    VrixSoftBodySceneRuntime? candidateRuntime;
     try {
-      final result = await const ObjectScanReconstructionService().reconstruct(store.snapshot);
-      final physics = PhysicsSceneService();
-      try {
-        result.mesh.bakeStaticCollider(physics, id: 'scan-${store.id}');
-      } catch (_) {
-        physics.dispose();
-        rethrow;
+      final result = await const ObjectScanReconstructionService()
+          .reconstruct(store.snapshot);
+      final origin = result.tetrahedralization.originWorldMeters;
+      final worldTransform = Matrix4.translationValues(
+        origin.x,
+        origin.y,
+        origin.z,
+      );
+      candidateRuntime = VrixSoftBodySceneRuntime.fromReconstruction(
+        reconstruction: result,
+        scene: physics,
+        objectId: store.id,
+        worldTransform: worldTransform,
+        config: const SoftBodySolverConfig(),
+      );
+      final initialFrame = candidateRuntime.advance(1 / 60);
+      final objectManager = _objects;
+      if (objectManager == null) {
+        throw StateError('AR object renderer is not ready for deformable mesh upload.');
       }
-      VrixSoftBodyFfiEngine? softBodyEngine;
-      SoftBodyHandle? softBodyHandle;
-      String softBodyStatus = 'محرك XPBD غير متاح على هذا التشغيل.';
-      try {
-        softBodyEngine = VrixSoftBodyFfiEngine.open();
-        softBodyHandle = softBodyEngine.createBody(
-          mesh: result.tetrahedralization.mesh,
-          material: const SoftBodyMaterial(),
-          config: const SoftBodySolverConfig(),
-        );
-        // Prime the native solver and validate that it returns a complete
-        // state before advertising the body as initialized.
-        softBodyEngine.step(1 / 60);
-        final initialState = softBodyEngine.readState(softBodyHandle);
-        if (initialState.positions.length != result.tetrahedralization.vertexCount * 3) {
-          throw StateError('XPBD returned a state with an unexpected vertex count.');
-        }
-        final objectManager = _objects;
-        if (objectManager == null) {
-          throw StateError('AR object renderer is not ready for deformable mesh upload.');
-        }
-        final meshId = 'soft-body-${store.id}';
-        final previousMeshId = _deformableMeshId;
-        if (previousMeshId != null) {
-          await objectManager.removeDeformableMesh(previousMeshId);
-          _deformableMeshId = null;
-        }
-        final addedToAr = await objectManager.addDeformableMesh(
-          id: meshId,
-          positions: initialState.positions,
-          triangleIndices: result.tetrahedralization.mesh.surfaceTriangleIndices,
-          worldTransform: Matrix4.translationValues(
-            result.tetrahedralization.originWorldMeters.x,
-            result.tetrahedralization.originWorldMeters.y,
-            result.tetrahedralization.originWorldMeters.z,
-          ),
-        );
-        if (!addedToAr) {
-          throw StateError('Filament refused to create the deformable AR surface.');
-        }
-        _deformableMeshId = meshId;
-        _meshUploadFaultReported = false;
-        softBodyStatus = 'XPBD متصل بسطح Filament داخل جلسة AR؛ ربط التصادم مع Jolt ما زال قيد الإكمال.';
-      } catch (error) {
-        softBodyEngine?.dispose();
-        softBodyEngine = null;
-        softBodyHandle = null;
-        softBodyStatus = 'لم يبدأ XPBD: $error';
+
+      final meshId = 'soft-body-${store.id}';
+      await _removeDeformableMesh();
+      final addedToAr = await objectManager.addDeformableMesh(
+        id: meshId,
+        positions: initialFrame.positions,
+        triangleIndices: initialFrame.surfaceTriangleIndices,
+        worldTransform: initialFrame.worldTransform,
+      );
+      if (!addedToAr) {
+        throw StateError('Filament refused to create the deformable AR surface.');
       }
+
+      // Commit the new runtime only after both the solver and AR mesh exist.
       _softBodyTicker?.cancel();
       _handXpbdBridge?.clear();
       _handXpbdBridge = null;
-      _softBodyEngine?.dispose();
-      _softBodyEngine = softBodyEngine;
-      _softBodyHandle = softBodyHandle;
-      final origin = result.tetrahedralization.originWorldMeters;
-      _softBodyWorldTransform = softBodyHandle == null
-          ? null
-          : Matrix4.translationValues(origin.x, origin.y, origin.z);
-      _softBodySteps = 0;
-      final activeSoftBodyEngine = softBodyEngine;
-      final activeSoftBodyHandle = softBodyHandle;
-      if (activeSoftBodyEngine != null && activeSoftBodyHandle != null) {
-        _softBodyTicker = Timer.periodic(const Duration(milliseconds: 16), (_) {
-          try {
-            activeSoftBodyEngine.step(1 / 60);
-            _softBodySteps++;
-            if (_softBodySteps % 4 == 0) {
-              final state = activeSoftBodyEngine.readState(activeSoftBodyHandle);
-              if (state.positions.length != result.tetrahedralization.vertexCount * 3) {
-                throw StateError('XPBD state vertex count changed unexpectedly.');
-              }
-              _uploadDeformableMeshFrame(state.positions);
-              if (mounted) setState(() {});
-            }
-          } catch (error) {
-            _softBodyTicker?.cancel();
-            if (mounted) setState(() => _error = 'توقفت محاكاة XPBD: $error');
+      _softBodyRuntime?.dispose();
+      _physicsScene?.dispose();
+      _softBodyRuntime = candidateRuntime;
+      candidateRuntime = null;
+      _physicsScene = physics;
+      _softBodyWorldTransform = worldTransform;
+      _deformableMeshId = meshId;
+      _meshUploadFaultReported = false;
+      _softBodyFrame = initialFrame;
+      _softBodySteps = _softBodyRuntime!.coupledSteps;
+
+      _spawnCouplingProbe(
+        physics: physics,
+        runtime: _softBodyRuntime!,
+        scanId: store.id,
+      );
+
+      final clock = Stopwatch()..start();
+      var previousMicros = clock.elapsedMicroseconds;
+      final activeRuntime = _softBodyRuntime!;
+      _softBodyTicker = Timer.periodic(const Duration(milliseconds: 16), (_) {
+        if (!mounted || activeRuntime.isDisposed) return;
+        final now = clock.elapsedMicroseconds;
+        final deltaSeconds = ((now - previousMicros) / 1000000)
+            .clamp(0.0, 0.05)
+            .toDouble();
+        previousMicros = now;
+        try {
+          final frame = activeRuntime.advance(deltaSeconds);
+          _softBodySteps = activeRuntime.coupledSteps;
+          if (frame.frameNumber % 4 == 0) {
+            _softBodyFrame = frame;
+            _uploadDeformableMeshFrame(frame.positions);
+            if (mounted) setState(() {});
           }
+        } catch (error) {
+          _softBodyTicker?.cancel();
+          if (mounted) {
+            setState(() => _error = 'توقفت محاكاة Jolt↔XPBD: $error');
+          }
+        }
+      });
+
+      if (mounted) {
+        setState(() {
+          _reconstruction = result;
+          _status =
+              'تم ربط Jolt وXPBD وعرض السطح المتشوه مباشرة في AR. '
+              'نقاط التلامس: ${activeRuntime.activeContactCount} · '
+              'عناصر XPBD: ${result.tetrahedralization.tetrahedronCount} · '
+              'مثلثات السطح: ${result.mesh.triangleCount} · '
+              'نقاط RGB-D: ${result.inputPointCount}.';
         });
       }
-      _physicsScene?.dispose();
-      _physicsScene = physics;
-      if (mounted) setState(() {
-        _reconstruction = result;
-        _status = 'تم إنشاء GLB وJolt Collider. عناصر XPBD: ${result.tetrahedralization.tetrahedronCount} · ${softBodyStatus} المثلثات: ${result.mesh.triangleCount} · النقاط: ${result.inputPointCount}.';
-      });
     } catch (error) {
-      if (mounted) setState(() {
-        _error = error.toString();
-        _status = 'تعذرت إعادة البناء. لم يتم اعتماد مجسم أو Collider غير صالح.';
-      });
+      candidateRuntime?.dispose();
+      physics.dispose();
+      if (mounted) {
+        setState(() {
+          _error = error.toString();
+          _status = 'تعذرت إعادة البناء أو تهيئة محركي Jolt وXPBD. لم يتم اعتماد نتيجة غير صالحة.';
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _spawnCouplingProbe({
+    required PhysicsSceneService physics,
+    required VrixSoftBodySceneRuntime runtime,
+    required String scanId,
+  }) {
+    final positions = runtime.mesh.positions;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    for (var i = 1; i < positions.length; i += 3) {
+      minY = minY < positions[i] ? minY : positions[i];
+      maxY = maxY > positions[i] ? maxY : positions[i];
+    }
+    if (!minY.isFinite || !maxY.isFinite || maxY <= minY) {
+      throw StateError('Unable to determine a stable soft-body contact probe position.');
+    }
+    final topThreshold = maxY - ((maxY - minY) * 0.08).clamp(0.02, 0.08);
+    var topX = 0.0;
+    var topZ = 0.0;
+    var topCount = 0;
+    for (var i = 0; i < positions.length; i += 3) {
+      if (positions[i + 1] < topThreshold) continue;
+      topX += positions[i];
+      topZ += positions[i + 2];
+      topCount++;
+    }
+    if (topCount > 0) {
+      topX /= topCount;
+      topZ /= topCount;
+    }
+    final radius = ((maxY - minY) * 0.05).clamp(0.015, 0.04).toDouble();
+    final localPosition = Vector3(topX, maxY + radius + 0.06, topZ);
+    final worldPosition = runtime.worldTransform.transform3(localPosition);
+    final probeId = 'scan-probe-$scanId';
+    physics.addDynamicSphere(
+      id: probeId,
+      worldTransform: Matrix4.identity()..setTranslation(worldPosition),
+      radius: radius,
+      mass: 0.2,
+      friction: 0.4,
+      restitution: 0,
+      continuous: true,
+    );
+    _probeBodyId = probeId;
   }
 
   void _uploadDeformableMeshFrame(List<double> positions) {
