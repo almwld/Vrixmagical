@@ -22,6 +22,9 @@ class SplatKitViewController extends ChangeNotifier {
   String status = 'جارٍ الاتصال بمحرك Vulkan…';
   String? error;
   String quality = 'medium';
+  bool hiZOcclusionEnabled = false;
+  bool? renderPolicyAccepted;
+  List<String> renderPolicyWarnings = const [];
   Map<String, dynamic> stats = const {};
   Map<String, dynamic> cameraPose = const {};
   Map<String, dynamic> capabilities = const {};
@@ -211,8 +214,45 @@ class SplatKitViewController extends ChangeNotifier {
   Future<Map<String, dynamic>?> applyRenderPolicy(
     Map<String, Object?> policy,
   ) async {
-    final result = await _invoke('applyRenderPolicy', {'policy': policy});
-    return result == null ? null : Map<String, dynamic>.from(result as Map);
+    final value = await _invoke('applyRenderPolicy', {'policy': policy});
+    if (value == null) return null;
+    final result = Map<String, dynamic>.from(value as Map);
+    renderPolicyAccepted = result['accepted'] as bool? ?? false;
+    renderPolicyWarnings = List<String>.from(
+      result['warnings'] as List? ?? const [],
+    );
+    final policyError = result['error'] as String?;
+    if (policyError != null) error = policyError;
+    notifyListeners();
+    return result;
+  }
+
+  Future<void> setHiZOcclusion(bool enabled) async {
+    if (enabled && capabilities['supportsHiZOcclusion'] != true) {
+      renderPolicyAccepted = false;
+      renderPolicyWarnings = const [
+        'Hi-Z occlusion is not supported by this Vulkan device.',
+      ];
+      notifyListeners();
+      return;
+    }
+    final result = await applyRenderPolicy({
+      'lodErrorPixels': 1.0,
+      'lodSplatLimit': 0,
+      'alphaThreshold': 1 / 255,
+      'subpixelThreshold': 1.0,
+      'enableFrustumCulling': true,
+      'enableHiZOcclusion': enabled,
+      'enableEarlyTermination': true,
+      'sortDepth': 16,
+    });
+    if (result?['accepted'] == true) {
+      hiZOcclusionEnabled = enabled;
+      error = null;
+    } else if (result?['error'] != null) {
+      error = result!['error'] as String;
+    }
+    notifyListeners();
   }
 
   Future<void> startBenchmark({double seconds = 10}) async {
