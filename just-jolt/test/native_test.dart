@@ -518,6 +518,72 @@ void main() {
     });
   });
 
+  group('collision-pair handle and lifecycle edge cases', () {
+    test('rejects invalid, stale, and cross-world body handles', () {
+      using((arena) {
+        final worldA = _world(arena);
+        final worldB = _world(arena);
+        final shape = _boxShape(arena, 0.5);
+        final a = _body(arena, worldA, shape);
+        final b = _body(arena, worldA, shape, x: 2);
+        final foreign = _body(arena, worldB, shape, x: 4);
+        jj_shape_release(shape.cast());
+
+        expect(jj_collision_pair_create(0, a, b, false), 0);
+        expect(jj_collision_pair_create(worldA, 0, b, false), 0);
+        expect(jj_collision_pair_create(worldA, a, -1, false), 0);
+        expect(jj_collision_pair_create(worldA, a, a, false), 0);
+        expect(jj_collision_pair_create(worldA, a, foreign, false), 0);
+
+        final pair = jj_collision_pair_create(worldA, a, b, false);
+        expect(pair, isNot(0));
+        expect(jj_collision_pair_set_enabled(0, true), isFalse);
+        expect(jj_collision_pair_set_enabled(-1, true), isFalse);
+        expect(jj_collision_pair_restore(0), isFalse);
+        expect(jj_collision_pair_restore(-1), isFalse);
+        jj_collision_pair_destroy(-1);
+        expect(jj_collision_pair_valid(pair), isTrue);
+
+        jj_collision_pair_destroy(pair);
+        expect(jj_collision_pair_valid(pair), isFalse);
+        expect(jj_collision_pair_set_enabled(pair, true), isFalse);
+        expect(jj_collision_pair_restore(pair), isFalse);
+        jj_world_destroy(worldA);
+        jj_world_destroy(worldB);
+      });
+    });
+
+    test('repeated toggles remain stable and destroying either endpoint releases lease', () {
+      using((arena) {
+        final world = _world(arena);
+        final shape = _boxShape(arena, 0.5);
+        final a = _body(arena, world, shape);
+        final b = _body(arena, world, shape, x: 2);
+        jj_shape_release(shape.cast());
+
+        final pair = jj_collision_pair_create(world, a, b, false);
+        expect(pair, isNot(0));
+        for (var i = 0; i < 20; i++) {
+          expect(jj_collision_pair_set_enabled(pair, i.isEven), isTrue);
+          expect(jj_collision_pair_valid(pair), isTrue);
+        }
+        // Idempotent state requests are successful and do not invalidate the lease.
+        expect(jj_collision_pair_set_enabled(pair, false), isTrue);
+        expect(jj_collision_pair_set_enabled(pair, false), isTrue);
+        expect(jj_collision_pair_set_enabled(pair, true), isTrue);
+        expect(jj_collision_pair_set_enabled(pair, true), isTrue);
+
+        jj_body_destroy(b);
+        expect(jj_body_valid(a), isTrue);
+        expect(jj_body_valid(b), isFalse);
+        expect(jj_collision_pair_valid(pair), isFalse);
+        expect(jj_collision_pair_set_enabled(pair, false), isFalse);
+        jj_collision_pair_destroy(pair);
+        jj_world_destroy(world);
+      });
+    });
+  });
+
   test('debug lines are there only in the dev flavour', () {
     using((arena) {
       final world = _world(arena);
