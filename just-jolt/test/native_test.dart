@@ -410,6 +410,9 @@ void main() {
       using((arena) {
         final world = _world(arena);
         final zeroGravity = arena<Float>(3);
+        zeroGravity[0] = 0;
+        zeroGravity[1] = 0;
+        zeroGravity[2] = 0;
         jj_world_set_gravity(world, zeroGravity);
         final shape = _boxShape(arena, 0.5);
         final a = _body(arena, world, shape, x: 0);
@@ -442,6 +445,25 @@ void main() {
             reason: 'the selected pair must not generate a contact');
         expect(saw(a, environment), isTrue,
             reason: 'unrelated environment collisions remain enabled');
+
+        expect(jj_collision_pair_set_enabled(pair, true), isTrue);
+        expect(jj_world_step(world, _dt, 1), 0);
+        var toggledCount = jj_drain_events(world, events, 32);
+        var enabledContact = false;
+        for (var i = 0; i < toggledCount; i++) {
+          final e = events[i];
+          if (e.type == JJ_EVENT_CONTACT_BEGIN &&
+              ((e.bodyA == a && e.bodyB == b) ||
+                  (e.bodyA == b && e.bodyB == a))) {
+            enabledContact = true;
+          }
+        }
+        expect(enabledContact, isTrue,
+            reason: 'enabling the pair restores its contact response');
+
+        expect(jj_collision_pair_set_enabled(pair, false), isTrue);
+        expect(jj_world_step(world, _dt, 1), 0);
+        toggledCount = jj_drain_events(world, events, 32);
 
         expect(jj_collision_pair_restore(pair), isTrue);
         expect(jj_collision_pair_valid(pair), isFalse);
