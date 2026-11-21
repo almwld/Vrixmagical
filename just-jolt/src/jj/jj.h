@@ -416,6 +416,28 @@ JJ_API bool jj_body_valid(int64_t body);
 /// Moves a body to another layer.
 JJ_API void jj_body_set_layer(int64_t body, int32_t layer);
 
+/* ---- Temporary collision-pair filters ---------------------------------- */
+
+/// Creates an isolated collision rule for exactly two bodies. The bodies
+/// must be live in [world] and neither may already belong to another pair
+/// lease. Other bodies retain ordinary collision behavior. Returns 0 on
+/// invalid/cross-world handles or when no collision-group ID is available.
+JJ_API int64_t jj_collision_pair_create(int64_t world, int64_t bodyA,
+                                        int64_t bodyB, bool initiallyEnabled);
+
+/// Enables or disables collision between the leased pair. Other pairs are
+/// unaffected. Changes invalidate cached contacts and wake movable bodies.
+JJ_API bool jj_collision_pair_set_enabled(int64_t pair, bool enabled);
+
+/// Restores both bodies' original collision groups and releases the lease.
+JJ_API bool jj_collision_pair_restore(int64_t pair);
+
+/// Releases the lease; equivalent to restore.
+JJ_API void jj_collision_pair_destroy(int64_t pair);
+
+/// Whether the collision-pair lease is alive.
+JJ_API bool jj_collision_pair_valid(int64_t pair);
+
 /// Writes JJ_TRANSFORM_FLOATS floats per body; dead handles write zeros.
 /// Returns count, or 0 for a dead world.
 JJ_API int32_t jj_get_transforms(int64_t world, const int64_t* bodies,

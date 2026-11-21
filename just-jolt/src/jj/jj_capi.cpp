@@ -19,6 +19,7 @@
 #include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
+#include <Jolt/Physics/Collision/GroupFilterTable.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
@@ -158,7 +159,12 @@ class JjIgnoreBody final : public BodyFilter {
 // generation is bumped each time its slot is reused, and an entry's sequence
 // each time its index is.
 
-enum HandleType : uint32 { kBodyHandle = 1, kJointHandle = 2, kCharacterHandle = 3 };
+enum HandleType : uint32 {
+  kCollisionPairHandle = 0,
+  kBodyHandle = 1,
+  kJointHandle = 2,
+  kCharacterHandle = 3
+};
 constexpr uint32 kGenMask = 0x3FFF;
 constexpr uint32 kIndexBits = 20;
 constexpr uint32 kIndexMask = (1u << kIndexBits) - 1;
@@ -204,6 +210,19 @@ struct JjJoint {
   BodyID b;  // invalid when fixed to the world
   int32_t kind = 0;
   uint32 seq = 0;
+};
+
+/// A scoped override of the collision groups for exactly two bodies.
+/// CollisionGroup copies retain their original RefConst<GroupFilter>.
+struct JjCollisionPair {
+  BodyID a;
+  BodyID b;
+  CollisionGroup originalA;
+  CollisionGroup originalB;
+  Ref<GroupFilterTable> filter;
+  CollisionGroup::GroupID groupID = CollisionGroup::cInvalidGroup;
+  uint32 seq = 0;
+  bool enabled = true;
 };
 
 struct JjWorld;
@@ -262,6 +281,10 @@ struct JjWorld {
   std::vector<uint32> characterSeq;
   std::vector<JjJoint*> joints;  // index; null when free
   std::vector<uint32> jointSeq;
+  std::vector<JjCollisionPair*> collisionPairs;  // index; null when free
+  std::vector<uint32> collisionPairSeq;
+  std::unordered_map<uint32, uint32> collisionPairByBody;
+  CollisionGroup::GroupID nextCollisionGroupID = 1;
   BodyIDVector scratchIds;
 
   uint32 tag(HandleType type) const { return objectTag(slot, gen, type); }
@@ -482,6 +505,20 @@ static bool findBody(int64_t handle, JjWorld** world, BodyID* id) {
   return true;
 }
 
+static JjCollisionPair* findCollisionPair(int64_t handle, JjWorld** world,
+                                                uint32* index) {
+  uint32 low = 0;
+  JjWorld* w = findOwner(handle, kCollisionPairHandle, &low);
+  if (w == nullptr) return nullptr;
+  uint32 i = low & kIndexMask;
+  if (i >= w->collisionPairs.size()) return nullptr;
+  JjCollisionPair* pair = w->collisionPairs[i];
+  if (pair == nullptr || pair->seq != (low >> kIndexBits)) return nullptr;
+  if (world != nullptr) *world = w;
+  if (index != nullptr) *index = i;
+  return pair;
+}
+
 static JjCharacter* findCharacter(int64_t handle, JjWorld** world, uint32* index) {
   uint32 low = 0;
   JjWorld* w = findOwner(handle, kCharacterHandle, &low);
@@ -529,6 +566,31 @@ static void removeJoint(JjWorld* w, uint32 index) {
   delete j;
 }
 
+/// Restore a lease while both bodies still exist. Called before either body
+/// is removed and before world teardown.
+static void removeCollisionPair(JjWorld* w, uint32 index) {
+  JjCollisionPair* pair = w->collisionPairs[index];
+  if (pair == nullptr) return;
+  BodyInterface& bodies = w->system->GetBodyInterfaceNoLock();
+  if (bodies.IsAdded(pair->a)) {
+    bodies.SetCollisionGroup(pair->a, pair->originalA);
+    bodies.InvalidateContactCache(pair->a);
+    if (bodies.GetMotionType(pair->a) != EMotionType::Static)
+      bodies.ActivateBody(pair->a);
+  }
+  if (bodies.IsAdded(pair->b)) {
+    bodies.SetCollisionGroup(pair->b, pair->originalB);
+    bodies.InvalidateContactCache(pair->b);
+    if (bodies.GetMotionType(pair->b) != EMotionType::Static)
+      bodies.ActivateBody(pair->b);
+  }
+  w->collisionPairByBody.erase(pair->a.GetIndexAndSequenceNumber());
+  w->collisionPairByBody.erase(pair->b.GetIndexAndSequenceNumber());
+  w->collisionPairs[index] = nullptr;
+  w->collisionPairSeq[index] = (w->collisionPairSeq[index] + 1) & kSeqMask;
+  delete pair;
+}
+
 static void removeCharacter(JjWorld* w, uint32 index) {
   JjCharacter* c = w->characters[index];
   if (c == nullptr) return;
@@ -544,6 +606,8 @@ static void removeCharacter(JjWorld* w, uint32 index) {
 static void destroyWorld(JjWorld* w) {
   w->system->SetContactListener(nullptr);
   w->system->SetBodyActivationListener(nullptr);
+  for (uint32 i = 0; i < w->collisionPairs.size(); i++)
+    removeCollisionPair(w, i);
   for (uint32 i = 0; i < w->characters.size(); i++) removeCharacter(w, i);
   for (uint32 i = 0; i < w->joints.size(); i++) removeJoint(w, i);
 
@@ -1091,6 +1155,10 @@ void jj_body_destroy(int64_t body) {
   JjWorld* w = nullptr;
   BodyID id;
   if (!findBody(body, &w, &id)) return;
+  // Restore any temporary pair lease before the body ID becomes invalid.
+  auto lease = w->collisionPairByBody.find(id.GetIndexAndSequenceNumber());
+  if (lease != w->collisionPairByBody.end())
+    removeCollisionPair(w, lease->second);
   // Its joints first: a joint must never outlive a body it holds.
   for (uint32 i = 0; i < w->joints.size(); i++) {
     JjJoint* j = w->joints[i];
@@ -1114,9 +1182,106 @@ void jj_body_set_layer(int64_t body, int32_t layer) {
   JjWorld* w = nullptr;
   BodyID id;
   if (layer < 0 || layer >= JJ_LAYER_COUNT || !findBody(body, &w, &id)) return;
+  // Layer changes do not invalidate a lease: its saved CollisionGroup is
+  // independent of the object's broad-phase layer.
   BodyInterface& bodies = w->system->GetBodyInterface();
   ObjectLayer old = bodies.GetObjectLayer(id);
   bodies.SetObjectLayer(id, objectLayer(kindOf(old), uint32(layer)));
+}
+
+int64_t jj_collision_pair_create(int64_t world, int64_t bodyA,
+                                 int64_t bodyB, bool initiallyEnabled) {
+  std::lock_guard<std::recursive_mutex> guard(gLock);
+  JjWorld* w = findWorld(world);
+  JjWorld* ownerA = nullptr;
+  JjWorld* ownerB = nullptr;
+  BodyID a, b;
+  if (w == nullptr || bodyA == bodyB ||
+      !findBody(bodyA, &ownerA, &a) || ownerA != w ||
+      !findBody(bodyB, &ownerB, &b) || ownerB != w) return 0;
+  uint32 keyA = a.GetIndexAndSequenceNumber();
+  uint32 keyB = b.GetIndexAndSequenceNumber();
+  if (w->collisionPairByBody.count(keyA) != 0 ||
+      w->collisionPairByBody.count(keyB) != 0) return 0;
+
+  // Group IDs are world-wide. Never reuse an ID currently present on any
+  // body: an unrelated body sharing it could inherit this pair's filter.
+  std::unordered_set<uint32> occupied;
+  BodyIDVector& ids = w->scratchIds;
+  w->system->GetBodies(ids);
+  BodyInterface& bodies = w->system->GetBodyInterface();
+  for (const BodyID& id : ids) {
+    CollisionGroup group = bodies.GetCollisionGroup(id);
+    if (group.GetGroupID() != CollisionGroup::cInvalidGroup)
+      occupied.insert(group.GetGroupID());
+  }
+  CollisionGroup::GroupID groupID = w->nextCollisionGroupID;
+  while (groupID == CollisionGroup::cInvalidGroup || occupied.count(groupID))
+    ++groupID;
+  w->nextCollisionGroupID = groupID + 1;
+
+  uint32 index = freeIndex(w->collisionPairs, w->collisionPairSeq);
+  JjCollisionPair* pair = new JjCollisionPair();
+  pair->a = a;
+  pair->b = b;
+  pair->originalA = bodies.GetCollisionGroup(a);
+  pair->originalB = bodies.GetCollisionGroup(b);
+  pair->filter = new GroupFilterTable(2);
+  pair->groupID = groupID;
+  pair->seq = w->collisionPairSeq[index];
+  pair->enabled = initiallyEnabled;
+  if (!initiallyEnabled) pair->filter->DisableCollision(0, 1);
+
+  CollisionGroup groupA(pair->filter.GetPtr(), groupID, 0);
+  CollisionGroup groupB(pair->filter.GetPtr(), groupID, 1);
+  bodies.SetCollisionGroup(a, groupA);
+  bodies.SetCollisionGroup(b, groupB);
+  bodies.InvalidateContactCache(a);
+  bodies.InvalidateContactCache(b);
+  if (bodies.GetMotionType(a) != EMotionType::Static) bodies.ActivateBody(a);
+  if (bodies.GetMotionType(b) != EMotionType::Static) bodies.ActivateBody(b);
+
+  w->collisionPairs[index] = pair;
+  w->collisionPairByBody.emplace(keyA, index);
+  w->collisionPairByBody.emplace(keyB, index);
+  return objectHandle(w->tag(kCollisionPairHandle),
+                      entryLow(index, pair->seq));
+}
+
+bool jj_collision_pair_set_enabled(int64_t handle, bool enabled) {
+  std::lock_guard<std::recursive_mutex> guard(gLock);
+  JjWorld* w = nullptr;
+  JjCollisionPair* pair = findCollisionPair(handle, &w, nullptr);
+  if (pair == nullptr || pair->enabled == enabled) return pair != nullptr;
+  if (enabled) pair->filter->EnableCollision(0, 1);
+  else pair->filter->DisableCollision(0, 1);
+  pair->enabled = enabled;
+  BodyInterface& bodies = w->system->GetBodyInterface();
+  bodies.InvalidateContactCache(pair->a);
+  bodies.InvalidateContactCache(pair->b);
+  if (bodies.GetMotionType(pair->a) != EMotionType::Static)
+    bodies.ActivateBody(pair->a);
+  if (bodies.GetMotionType(pair->b) != EMotionType::Static)
+    bodies.ActivateBody(pair->b);
+  return true;
+}
+
+bool jj_collision_pair_restore(int64_t handle) {
+  std::lock_guard<std::recursive_mutex> guard(gLock);
+  JjWorld* w = nullptr;
+  uint32 index = 0;
+  if (findCollisionPair(handle, &w, &index) == nullptr) return false;
+  removeCollisionPair(w, index);
+  return true;
+}
+
+void jj_collision_pair_destroy(int64_t handle) {
+  jj_collision_pair_restore(handle);
+}
+
+bool jj_collision_pair_valid(int64_t handle) {
+  std::lock_guard<std::recursive_mutex> guard(gLock);
+  return findCollisionPair(handle, nullptr, nullptr) != nullptr;
 }
 
 int32_t jj_get_transforms(int64_t world, const int64_t* bodies, int32_t count,

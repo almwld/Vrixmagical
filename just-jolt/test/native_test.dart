@@ -405,6 +405,97 @@ void main() {
     });
   });
 
+  group('temporary collision-pair filters', () {
+    test('filters only its two bodies and restore re-enables their contact', () {
+      using((arena) {
+        final world = _world(arena);
+        final zeroGravity = arena<Float>(3);
+        jj_world_set_gravity(world, zeroGravity);
+        final shape = _boxShape(arena, 0.5);
+        final a = _body(arena, world, shape, x: 0);
+        final b = _body(arena, world, shape, x: 0.75);
+        final environment = _body(arena, world, shape, x: -0.75);
+        jj_shape_release(shape.cast());
+
+        final pair = jj_collision_pair_create(world, a, b, false);
+        expect(pair, isNot(0));
+        expect(jj_collision_pair_valid(pair), isTrue);
+        expect(jj_collision_pair_create(world, a, environment, false), 0,
+            reason: 'a body can have only one active pair lease');
+        expect(jj_collision_pair_create(world, a, b, false), 0,
+            reason: 'duplicate leases are rejected');
+
+        expect(jj_world_step(world, _dt, 1), 0);
+        final events = arena<JJ_Event>(32);
+        final count = jj_drain_events(world, events, 32);
+        bool saw(int x, int y) {
+          for (var i = 0; i < count; i++) {
+            final e = events[i];
+            if (e.type != JJ_EVENT_CONTACT_BEGIN) continue;
+            if ((e.bodyA == x && e.bodyB == y) ||
+                (e.bodyA == y && e.bodyB == x)) return true;
+          }
+          return false;
+        }
+
+        expect(saw(a, b), isFalse,
+            reason: 'the selected pair must not generate a contact');
+        expect(saw(a, environment), isTrue,
+            reason: 'unrelated environment collisions remain enabled');
+
+        expect(jj_collision_pair_restore(pair), isTrue);
+        expect(jj_collision_pair_valid(pair), isFalse);
+        expect(jj_world_step(world, _dt, 1), 0);
+        final restoredCount = jj_drain_events(world, events, 32);
+        var restoredContact = false;
+        for (var i = 0; i < restoredCount; i++) {
+          final e = events[i];
+          if (e.type == JJ_EVENT_CONTACT_BEGIN &&
+              ((e.bodyA == a && e.bodyB == b) ||
+                  (e.bodyA == b && e.bodyB == a))) {
+            restoredContact = true;
+          }
+        }
+        expect(restoredContact, isTrue,
+            reason: 'restoring original groups must restore the contact');
+        jj_world_destroy(world);
+      });
+    });
+
+    test('destroying either body restores and invalidates its lease', () {
+      using((arena) {
+        final world = _world(arena);
+        final shape = _boxShape(arena, 0.5);
+        final a = _body(arena, world, shape);
+        final b = _body(arena, world, shape, x: 0.75);
+        jj_shape_release(shape.cast());
+        final pair = jj_collision_pair_create(world, a, b, true);
+        expect(jj_collision_pair_valid(pair), isTrue);
+        jj_body_destroy(a);
+        expect(jj_collision_pair_valid(pair), isFalse);
+        expect(jj_body_valid(b), isTrue);
+        jj_collision_pair_destroy(pair); // stale handles are harmless
+        jj_world_step(world, _dt, 1);
+        jj_world_destroy(world);
+      });
+    });
+
+    test('world teardown invalidates outstanding pair handles', () {
+      using((arena) {
+        final world = _world(arena);
+        final shape = _boxShape(arena, 0.5);
+        final a = _body(arena, world, shape);
+        final b = _body(arena, world, shape, x: 2);
+        jj_shape_release(shape.cast());
+        final pair = jj_collision_pair_create(world, a, b, false);
+        expect(jj_collision_pair_valid(pair), isTrue);
+        jj_world_destroy(world);
+        expect(jj_collision_pair_valid(pair), isFalse);
+        expect(jj_collision_pair_restore(pair), isFalse);
+      });
+    });
+  });
+
   test('debug lines are there only in the dev flavour', () {
     using((arena) {
       final world = _world(arena);
