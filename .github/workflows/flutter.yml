@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: flutter-checks-${{ github.event.pull_request.number || github.ref }}
@@ -71,10 +71,13 @@ jobs:
         run: |
           flutter analyze --no-fatal-infos lib test packages/vrix_soft_body packages/flutter_reality_vrix
 
-      - name: Analyze and test the vendored just_jolt package independently
+      - name: Generate, analyze and test the vendored just_jolt package independently
         working-directory: just-jolt
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
           dart pub get
+          dart run ffigen --config ffigen.yaml
           dart analyze lib test
           dart test --reporter expanded
 
@@ -189,3 +192,17 @@ jobs:
           path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 30
+
+      - name: Commit regenerated just_jolt FFI bindings
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          if git diff --quiet -- just-jolt/lib/src/native/bindings.g.dart; then
+            echo "FFI bindings are already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add just-jolt/lib/src/native/bindings.g.dart
+          git commit -m "chore(just-jolt): regenerate native FFI bindings"
+          git push origin "HEAD:${{ github.head_ref }}"
+
