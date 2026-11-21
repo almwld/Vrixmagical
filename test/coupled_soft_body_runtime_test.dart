@@ -82,8 +82,22 @@ void main() {
 
         var frame = runtime.advance(1 / 60);
         final firstFrameContactCount = runtime.activeContactCount;
+        var peakAppliedReactionCount = runtime.lastAppliedReactionCount;
+        var peakAppliedReactionImpulseSquared =
+            runtime.lastAppliedReactionImpulse.length2;
         for (var i = 1; i < 6; i++) {
           frame = runtime.advance(1 / 60);
+          // Contacts can legitimately separate as the rigid probe responds.
+          // Capture the strongest observed feedback during the whole run rather
+          // than requiring the final frame to still be in contact.
+          peakAppliedReactionCount = peakAppliedReactionCount <
+                  runtime.lastAppliedReactionCount
+              ? runtime.lastAppliedReactionCount
+              : peakAppliedReactionCount;
+          final impulseSquared = runtime.lastAppliedReactionImpulse.length2;
+          if (impulseSquared > peakAppliedReactionImpulseSquared) {
+            peakAppliedReactionImpulseSquared = impulseSquared;
+          }
         }
 
         expect(frame.vertexCount, tetrahedralization.vertexCount);
@@ -92,8 +106,8 @@ void main() {
         expect(firstFrameContactCount, greaterThan(0));
         // Contact presence alone is not proof of two-way coupling: require
         // XPBD's measured reaction to be emitted as a point impulse to Jolt.
-        expect(runtime.lastAppliedReactionCount, greaterThan(0));
-        expect(runtime.lastAppliedReactionImpulse.length2, greaterThan(1e-12));
+        expect(peakAppliedReactionCount, greaterThan(0));
+        expect(peakAppliedReactionImpulseSquared, greaterThan(1e-12));
         expect(physics.isDynamicBody('runtime-probe'), isTrue);
         expect(physics.isDynamicBody('soft:runtime-test'), isFalse);
       } finally {
