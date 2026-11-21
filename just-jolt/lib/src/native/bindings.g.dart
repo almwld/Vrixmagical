@@ -2045,6 +2045,35 @@ external bool jj_body_valid(int body);
 @ffi.Native<ffi.Void Function(ffi.Int64, ffi.Int32)>(isLeaf: true)
 external void jj_body_set_layer(int body, int layer);
 
+/// Creates an isolated collision rule for exactly two bodies. The bodies
+/// must be live in [world] and neither may already belong to another pair
+/// lease. Other bodies retain ordinary collision behavior. Returns 0 on
+/// invalid/cross-world handles or when no collision-group ID is available.
+@ffi.Native<ffi.Int64 Function(ffi.Int64, ffi.Int64, ffi.Int64, ffi.Bool)>()
+external int jj_collision_pair_create(
+  int world,
+  int bodyA,
+  int bodyB,
+  bool initiallyEnabled,
+);
+
+/// Enables or disables collision between the leased pair. Other pairs are
+/// unaffected. Changes invalidate cached contacts and wake movable bodies.
+@ffi.Native<ffi.Bool Function(ffi.Int64, ffi.Bool)>()
+external bool jj_collision_pair_set_enabled(int pair, bool enabled);
+
+/// Restores both bodies' original collision groups and releases the lease.
+@ffi.Native<ffi.Bool Function(ffi.Int64)>()
+external bool jj_collision_pair_restore(int pair);
+
+/// Releases the lease; equivalent to restore.
+@ffi.Native<ffi.Void Function(ffi.Int64)>()
+external void jj_collision_pair_destroy(int pair);
+
+/// Whether the collision-pair lease is alive.
+@ffi.Native<ffi.Bool Function(ffi.Int64)>()
+external bool jj_collision_pair_valid(int pair);
+
 /// Writes JJ_TRANSFORM_FLOATS floats per body; dead handles write zeros.
 /// Returns count, or 0 for a dead world.
 @ffi.Native<
@@ -3307,30 +3336,3 @@ const int JJ_COMBINE_MIN = 1;
 const int JJ_COMBINE_MAX = 2;
 
 const int JJ_COMBINE_AVERAGE = 3;
-
-/// Creates an isolated collision rule for exactly two bodies.
-@ffi.Native<
-  ffi.Int64 Function(ffi.Int64, ffi.Int64, ffi.Int64, ffi.Bool)
->()
-external int jj_collision_pair_create(
-  int world,
-  int bodyA,
-  int bodyB,
-  bool initiallyEnabled,
-);
-
-/// Enables or disables collision between the leased pair.
-@ffi.Native<ffi.Bool Function(ffi.Int64, ffi.Bool)>(isLeaf: true)
-external bool jj_collision_pair_set_enabled(int pair, bool enabled);
-
-/// Restores both bodies' original collision groups and releases the lease.
-@ffi.Native<ffi.Bool Function(ffi.Int64)>(isLeaf: true)
-external bool jj_collision_pair_restore(int pair);
-
-/// Releases the collision-pair lease; equivalent to restore.
-@ffi.Native<ffi.Void Function(ffi.Int64)>()
-external void jj_collision_pair_destroy(int pair);
-
-/// Whether the collision-pair lease is alive.
-@ffi.Native<ffi.Bool Function(ffi.Int64)>(isLeaf: true)
-external bool jj_collision_pair_valid(int pair);
