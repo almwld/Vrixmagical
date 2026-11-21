@@ -3307,3 +3307,30 @@ const int JJ_COMBINE_MIN = 1;
 const int JJ_COMBINE_MAX = 2;
 
 const int JJ_COMBINE_AVERAGE = 3;
+
+/// Creates an isolated collision rule for exactly two bodies.
+@ffi.Native<
+  ffi.Int64 Function(ffi.Int64, ffi.Int64, ffi.Int64, ffi.Bool)
+>()
+external int jj_collision_pair_create(
+  int world,
+  int bodyA,
+  int bodyB,
+  bool initiallyEnabled,
+);
+
+/// Enables or disables collision between the leased pair.
+@ffi.Native<ffi.Bool Function(ffi.Int64, ffi.Bool)>(isLeaf: true)
+external bool jj_collision_pair_set_enabled(int pair, bool enabled);
+
+/// Restores both bodies' original collision groups and releases the lease.
+@ffi.Native<ffi.Bool Function(ffi.Int64)>(isLeaf: true)
+external bool jj_collision_pair_restore(int pair);
+
+/// Releases the collision-pair lease; equivalent to restore.
+@ffi.Native<ffi.Void Function(ffi.Int64)>()
+external void jj_collision_pair_destroy(int pair);
+
+/// Whether the collision-pair lease is alive.
+@ffi.Native<ffi.Bool Function(ffi.Int64)>(isLeaf: true)
+external bool jj_collision_pair_valid(int pair);
