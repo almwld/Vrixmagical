@@ -301,10 +301,16 @@ class PhysicsSceneService {
       convexRadius: record.shape.convexRadius,
     );
     final updated = using((arena) {
-      final nativeShape = _createShape(arena, nextShape);
-      // A deformed mesh can become temporarily degenerate (for example, when
-      // it is flattened). Keep the last valid Jolt proxy instead of failing
-      // the entire simulation frame; the caller can retry on a later update.
+      // Convex-hull cooking reports invalid/degenerate geometry as a
+      // StateError. Treat that as a rejected proxy update, not a fatal frame:
+      // XPBD remains authoritative and the previous Jolt hull stays installed.
+      final nativeShape = (() {
+        try {
+          return _createShape(arena, nextShape);
+        } on StateError {
+          return nullptr.cast<jolt.JPH_Shape>();
+        }
+      })();
       if (nativeShape.address == 0) return false;
       try {
         jolt.JPH_BodyInterface_SetShape(
