@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:vector_math/vector_math_64.dart';
 import 'package:vrix_soft_body/vrix_soft_body.dart';
 
@@ -7,34 +9,37 @@ import '../services/physics_scene_service.dart';
 
 /// Immutable, renderer-neutral snapshot of a deformable object's surface.
 ///
-/// Positions remain object-local metres. A renderer applies [worldTransform]
-/// and indexes the packed XYZ positions with [surfaceTriangleIndices].
+/// Positions and normals remain object-local. A renderer applies
+/// [worldTransform] and indexes the packed XYZ buffers with
+/// [surfaceTriangleIndices].
 class SoftBodyRenderFrame {
   SoftBodyRenderFrame({
     required this.frameNumber,
     required List<double> positions,
     required List<double> velocities,
     required List<int> surfaceTriangleIndices,
-    required Matrix4 worldTransform,
+    required this.worldTransform,
   })  : positions = List<double>.unmodifiable(positions),
         velocities = List<double>.unmodifiable(velocities),
         surfaceTriangleIndices =
-            List<int>.unmodifiable(surfaceTriangleIndices),
-        worldTransform = Matrix4.copy(worldTransform) {
+            List<int>.unmodifiable(surfaceTriangleIndices) {
     if (frameNumber < 0 ||
-        positions.isEmpty ||
-        positions.length % 3 != 0 ||
-        velocities.length != positions.length ||
-        positions.any((value) => !value.isFinite) ||
-        velocities.any((value) => !value.isFinite) ||
-        surfaceTriangleIndices.isEmpty ||
-        surfaceTriangleIndices.length % 3 != 0 ||
-        surfaceTriangleIndices.any(
-          (index) => index < 0 || index >= positions.length ~/ 3,
+        this.positions.isEmpty ||
+        this.positions.length % 3 != 0 ||
+        this.velocities.length != this.positions.length ||
+        this.positions.any((value) => !value.isFinite) ||
+        this.velocities.any((value) => !value.isFinite) ||
+        this.surfaceTriangleIndices.isEmpty ||
+        this.surfaceTriangleIndices.length % 3 != 0 ||
+        this.surfaceTriangleIndices.any(
+          (index) => index < 0 || index >= this.positions.length ~/ 3,
         ) ||
         worldTransform.storage.any((value) => !value.isFinite)) {
       throw const FormatException('Invalid deformable render-frame buffers.');
     }
+    normals = List<double>.unmodifiable(
+      _calculateVertexNormals(this.positions, this.surfaceTriangleIndices),
+    );
   }
 
   final int frameNumber;
@@ -43,8 +48,63 @@ class SoftBodyRenderFrame {
   final List<int> surfaceTriangleIndices;
   final Matrix4 worldTransform;
 
+  /// Area-weighted, per-vertex normals rebuilt from the current deformed
+  /// surface. The buffer is packed XYZ and remains in object-local space.
+  late final List<double> normals;
+
   int get vertexCount => positions.length ~/ 3;
   int get triangleCount => surfaceTriangleIndices.length ~/ 3;
+}
+
+List<double> _calculateVertexNormals(
+  List<double> positions,
+  List<int> triangleIndices,
+) {
+  final normals = List<double>.filled(positions.length, 0);
+
+  for (var i = 0; i < triangleIndices.length; i += 3) {
+    final a = triangleIndices[i] * 3;
+    final b = triangleIndices[i + 1] * 3;
+    final c = triangleIndices[i + 2] * 3;
+
+    final abX = positions[b] - positions[a];
+    final abY = positions[b + 1] - positions[a + 1];
+    final abZ = positions[b + 2] - positions[a + 2];
+    final acX = positions[c] - positions[a];
+    final acY = positions[c + 1] - positions[a + 1];
+    final acZ = positions[c + 2] - positions[a + 2];
+
+    // The unnormalized cross product is area weighted, avoiding unstable
+    // equal weighting when adjacent triangles have different areas.
+    final nx = abY * acZ - abZ * acY;
+    final ny = abZ * acX - abX * acZ;
+    final nz = abX * acY - abY * acX;
+    if (!nx.isFinite || !ny.isFinite || !nz.isFinite) {
+      throw const FormatException('Deformed surface produced non-finite normals.');
+    }
+
+    for (final vertex in <int>[a, b, c]) {
+      normals[vertex] += nx;
+      normals[vertex + 1] += ny;
+      normals[vertex + 2] += nz;
+    }
+  }
+
+  for (var i = 0; i < normals.length; i += 3) {
+    final x = normals[i];
+    final y = normals[i + 1];
+    final z = normals[i + 2];
+    final lengthSquared = x * x + y * y + z * z;
+    if (!lengthSquared.isFinite) {
+      throw const FormatException('Deformed surface produced invalid vertex normals.');
+    }
+    if (lengthSquared <= 1e-24) continue;
+    final inverseLength = 1 / math.sqrt(lengthSquared);
+    normals[i] = x * inverseLength;
+    normals[i + 1] = y * inverseLength;
+    normals[i + 2] = z * inverseLength;
+  }
+  return normals;
 }
 
 /// Owns the scan -> native XPBD/FEM -> Jolt coupling lifecycle for one object.
@@ -77,8 +137,7 @@ class VrixSoftBodySceneRuntime {
   int get coupledSteps => coupling.coupledSteps;
   int get activeContactCount => coupling.activeContactCount;
   int get lastAppliedReactionCount => coupling.lastAppliedReactionCount;
-  Vector3 get lastAppliedReactionImpulse =>
-      coupling.lastAppliedReactionImpulse;
+  Vector3 get lastAppliedReactionImpulse => coupling.lastAppliedReactionImpulse;
   Vector3 get lastContactNormalWorld => coupling.lastContactNormalWorld;
 
   /// Creates the native deformable body from a completed scan's tetrahedral

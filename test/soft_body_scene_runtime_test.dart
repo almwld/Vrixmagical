@@ -29,6 +29,24 @@ void main() {
       expect(frame.triangleCount, 4);
       expect(frame.positions.first, 0);
       expect(frame.surfaceTriangleIndices.first, 0);
+      expect(frame.normals, hasLength(12));
+      expect(frame.normals.every((value) => value.isFinite), isTrue);
+    });
+
+    test('rebuilds normalized vertex normals from deformed triangles', () {
+      final frame = SoftBodyRenderFrame(
+        frameNumber: 2,
+        positions: const [0, 0, 0, 1, 0, 0, 0, 1, 0],
+        velocities: const [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        surfaceTriangleIndices: const [0, 1, 2],
+        worldTransform: Matrix4.identity(),
+      );
+
+      for (var i = 0; i < frame.normals.length; i += 3) {
+        expect(frame.normals[i], closeTo(0, 1e-9));
+        expect(frame.normals[i + 1], closeTo(0, 1e-9));
+        expect(frame.normals[i + 2], closeTo(1, 1e-9));
+      }
     });
 
     test('rejects mismatched or out-of-range render buffers', () {
