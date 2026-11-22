@@ -199,8 +199,15 @@ class CoupledSoftBodyPhysics {
     final transform = scene.bodyWorldTransform(proxyBodyId);
     final inverse = Matrix4.inverted(transform);
     final state = engine.readState(softBody);
-    final hits = scene.overlapBody(proxyBodyId, includeSensors: false)
-      ..sort((a, b) => (a.bodyId ?? '').compareTo(b.bodyId ?? ''));
+    // The overlap API defaults to 64 hits, which silently drops rigid
+    // bodies in dense scenes. Use its documented hard cap so contact-slot
+    // selection sees the complete bounded result set before deterministic
+    // per-vertex reduction to four independent constraints.
+    final hits = scene.overlapBody(
+      proxyBodyId,
+      includeSensors: false,
+      maxHits: 4096,
+    )..sort((a, b) => (a.bodyId ?? '').compareTo(b.bodyId ?? ''));
     final nextContacts = <int, Map<String, _ActiveContact>>{};
     _lastContactNormalWorld.setZero();
 
