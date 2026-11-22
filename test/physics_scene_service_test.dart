@@ -148,17 +148,41 @@ void main() {
       expect(physics.isDynamicBody('contact-probe'), isTrue);
       expect(physics.isDynamicBody('soft-proxy'), isFalse);
 
-      physics.updateKinematicConvexHull(
-        id: 'soft-proxy',
-        vertices: <Vector3>[
-          Vector3(2.5, -0.5, -0.5),
-          Vector3(3.5, -0.5, -0.5),
-          Vector3(3, 0.5, -0.5),
-          Vector3(3, 0, 0.5),
-        ],
+      expect(
+        physics.updateKinematicConvexHull(
+          id: 'soft-proxy',
+          vertices: <Vector3>[
+            Vector3(2.5, -0.5, -0.5),
+            Vector3(3.5, -0.5, -0.5),
+            Vector3(3, 0.5, -0.5),
+            Vector3(3, 0, 0.5),
+          ],
+        ),
+        isTrue,
       );
       physics.advance(1 / 60);
       expect(physics.bodyCount, 2);
+      expect(
+        physics.overlapBody('soft-proxy')
+            .any((hit) => hit.bodyId == 'contact-probe'),
+        isFalse,
+      );
+
+      // Degenerate geometry must not replace the last valid native hull or
+      // abort the next simulation frame. The next update can retry cooking.
+      expect(
+        physics.updateKinematicConvexHull(
+          id: 'soft-proxy',
+          vertices: <Vector3>[
+            Vector3.zero(),
+            Vector3(1, 0, 0),
+            Vector3(2, 0, 0),
+            Vector3(3, 0, 0),
+          ],
+        ),
+        isFalse,
+      );
+      expect(() => physics.advance(1 / 60), returnsNormally);
       expect(
         physics.overlapBody('soft-proxy')
             .any((hit) => hit.bodyId == 'contact-probe'),
