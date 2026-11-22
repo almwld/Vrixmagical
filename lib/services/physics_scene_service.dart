@@ -69,6 +69,7 @@ class _ShapeSpec {
 class _BodyRecord {
   _BodyRecord({
     required this.id,
+    required this.identity,
     required this.shape,
     required this.motionType,
     required this.transform,
@@ -85,6 +86,7 @@ class _BodyRecord {
   });
 
   final String id;
+  final int identity;
   _ShapeSpec shape;
   int motionType;
   Matrix4 transform;
@@ -186,6 +188,7 @@ class PhysicsSceneService {
   final StreamController<PhysicsContactEvent> _eventController =
       StreamController<PhysicsContactEvent>.broadcast(sync: true);
   double _accumulator = 0;
+  int _bodyIdentityCounter = 0;
   bool _disposed = false;
 
   int get bodyCount => _bodies.length;
@@ -328,6 +331,12 @@ class PhysicsSceneService {
     if (!updated) return false;
     record.shape = nextShape;
     return true;
+  }
+
+  /// Stable for one body lifetime; changes when an ID is removed and reused.
+  int? bodyIdentity(String id) {
+    _ensureAvailable();
+    return _bodies[id]?.identity;
   }
 
   /// True only for dynamic bodies that can receive XPBD reaction impulses.
@@ -573,6 +582,7 @@ class PhysicsSceneService {
     _toPose(worldTransform);
     final record = _BodyRecord(
       id: id,
+      identity: ++_bodyIdentityCounter,
       shape: shape,
       motionType: motionType,
       transform: Matrix4.copy(worldTransform),

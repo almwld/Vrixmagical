@@ -222,6 +222,8 @@ class CoupledSoftBodyPhysics {
     for (final hit in hits) {
       final otherBody = hit.bodyId;
       if (otherBody == null || otherBody == proxyBodyId) continue;
+      final otherBodyIdentity = scene.bodyIdentity(otherBody);
+      if (otherBodyIdentity == null) continue;
 
       final localPoint = inverse.transform3(Vector3.copy(hit.point));
       // JJ_Hit.normal is the target surface normal facing the query shape.
@@ -247,6 +249,7 @@ class CoupledSoftBodyPhysics {
       final slot = contactsForVertex.length;
       contactsForVertex[otherBody] = _ActiveContact(
         otherBodyId: otherBody,
+        otherBodyIdentity: otherBodyIdentity,
         vertexIndex: nearest.index,
         contactSlot: slot,
         worldPoint: Vector3.copy(hit.point),
@@ -261,6 +264,8 @@ class CoupledSoftBodyPhysics {
       final next = nextContacts[entry.key] ?? const <String, _ActiveContact>{};
       for (final previous in entry.value.values) {
         if (!next.containsKey(previous.otherBodyId) ||
+            next[previous.otherBodyId]!.otherBodyIdentity !=
+                previous.otherBodyIdentity ||
             next[previous.otherBodyId]!.contactSlot != previous.contactSlot) {
           engine.clearContact(
             body: softBody,
@@ -371,6 +376,7 @@ class CoupledSoftBodyPhysics {
 class _ActiveContact {
   const _ActiveContact({
     required this.otherBodyId,
+    required this.otherBodyIdentity,
     required this.vertexIndex,
     required this.contactSlot,
     required this.worldPoint,
@@ -379,6 +385,7 @@ class _ActiveContact {
   });
 
   final String otherBodyId;
+  final int otherBodyIdentity;
   final int vertexIndex;
   final int contactSlot;
   final Vector3 worldPoint;
