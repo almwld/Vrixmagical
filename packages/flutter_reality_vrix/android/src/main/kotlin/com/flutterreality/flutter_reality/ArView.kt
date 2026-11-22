@@ -27,7 +27,7 @@ import com.google.ar.core.Frame
 import com.google.ar.core.Plane
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
-import com.flutterreality.flutter_reality.Serialization.deserializeMatrix4
+import com.flutterreality.flutter_reality.Serialization.deserializeArCorePose
 import com.flutterreality.flutter_reality.Serialization.serializePose
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
@@ -866,9 +866,6 @@ class ArView(
         val isRaw: Boolean, val isReprojected: Boolean, val intrinsics: Map<String, Any>,
     )
 
-    private fun intrinsicsMap(fx: Float, fy: Float, cx: Float, cy: Float, w: Int, h: Int) =
-        mapOf<String, Any>("fx" to fx.toDouble(), "fy" to fy.toDouble(), "cx" to cx.toDouble(),
-            "cy" to cy.toDouble(), "width" to w, "height" to h)
 
     private fun copyYuv(image: Image): ByteArray {
         val w=image.width; val h=image.height
@@ -890,6 +887,22 @@ class ArView(
         return out.toByteArray()
     }
 
+    private fun intrinsicsMap(
+        fx: Float,
+        fy: Float,
+        cx: Float,
+        cy: Float,
+        width: Int,
+        height: Int,
+    ): Map<String, Any> = mapOf(
+        "fx" to fx.toDouble(),
+        "fy" to fy.toDouble(),
+        "cx" to cx.toDouble(),
+        "cy" to cy.toDouble(),
+        "width" to width,
+        "height" to height,
+    )
+
     private fun copyDepth(frame: Frame, image: Image, confidenceImage: Image?, raw: Boolean): DepthCopy {
         val w=image.width; val h=image.height; val p=image.planes[0]; val src=p.buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         val values=ByteBuffer.allocate(w*h*4).order(ByteOrder.LITTLE_ENDIAN)
@@ -907,12 +920,16 @@ class ArView(
             }
             hasConfidence=true
         } else confidence.fill(0xff.toByte())
-        val intr=frame.camera.textureIntrinsics; val f=intr.focalLength; val c=intr.principalPoint; val d=intr.imageDimensions
-        val sx=w.toFloat()/d[0]; val sy=h.toFloat()/d[1]; val timestamp=image.timestamp
+        // Depth and the CPU RGB image are registered to the same camera image
+        // intrinsics. Texture intrinsics can describe a cropped GPU texture and
+        // would shift the RGB-D projection on devices with a different crop.
+        val intr=frame.camera.imageIntrinsics; val f=intr.focalLength; val c=intr.principalPoint; val d=intr.imageDimensions
+        val scaledIntrinsics = scaleDepthIntrinsics(f[0], f[1], c[0], c[1], d[0], d[1], w, h)
+        val timestamp=image.timestamp
         val reprojection=raw && lastRawDepthTimestamp==timestamp
         if(raw) lastRawDepthTimestamp=timestamp
         return DepthCopy(w,h,timestamp,values.array(),confidence,hasConfidence,raw,reprojection,
-            intrinsicsMap(f[0]*sx,f[1]*sy,c[0]*sx,c[1]*sy,w,h))
+            scaledIntrinsics.toChannelMap())
     }
 
     private fun tryCaptureSynchronizedFrame(frame: Frame) {
@@ -1067,22 +1084,13 @@ class ArView(
     override suspend fun addAnchor(anchor: AnchorMessage): Boolean {
         if (anchor.type.toInt() != 0) return false // only plane anchors are supported
         return try {
-            val transform = ArrayList(anchor.transformation)
-            val (position, rotation) = deserializeMatrix4(transform)
-
-            val pose = Pose(
-                floatArrayOf(position.x, position.y, position.z),
-                floatArrayOf(rotation.x, rotation.y, rotation.z, 1f),
-            )
-
+            val pose = deserializeArCorePose(anchor.transformation)
             val arAnchor = sceneView.session?.createAnchor(pose) ?: return false
-            val anchorNode = AnchorNode(sceneView.engine, arAnchor)
-            try {
-                anchorNode.transform = Transform(position = position, rotation = rotation)
-            } catch (e: Exception) {
-                Log.w(TAG, "Transform warning suppressed: ${e.message}")
-            }
 
+            // AnchorNode owns the anchor's world pose and continuously follows
+            // ARCore tracking updates. Do not overwrite it with a second local
+            // transform; doing so applies the placement transform twice.
+            val anchorNode = AnchorNode(sceneView.engine, arAnchor)
             sceneView.addChildNode(anchorNode)
             anchorNodesMap[anchor.name] = anchorNode
             true
