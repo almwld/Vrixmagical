@@ -122,6 +122,74 @@ void main() {
       expect(casts.any((hit) => hit.bodyId == 'query-target'), isTrue);
     });
 
+    test('supports a kinematic sensor hull for XPBD contacts and dynamic filtering', () {
+      physics.addKinematicConvexHull(
+        id: 'soft-proxy',
+        worldTransform: Matrix4.identity(),
+        sensor: true,
+        vertices: <Vector3>[
+          Vector3(-0.5, -0.5, -0.5),
+          Vector3(0.5, -0.5, -0.5),
+          Vector3(0, 0.5, -0.5),
+          Vector3(0, 0, 0.5),
+        ],
+      );
+      physics.addDynamicSphere(
+        id: 'contact-probe',
+        worldTransform: Matrix4.identity()
+          ..setTranslation(Vector3(0.1, 0, 0)),
+        radius: 0.15,
+        mass: 0.2,
+      );
+      physics.advance(1 / 60);
+
+      final overlaps = physics.overlapBody('soft-proxy');
+      expect(overlaps.any((hit) => hit.bodyId == 'contact-probe'), isTrue);
+      expect(physics.isDynamicBody('contact-probe'), isTrue);
+      expect(physics.isDynamicBody('soft-proxy'), isFalse);
+
+      expect(
+        physics.updateKinematicConvexHull(
+          id: 'soft-proxy',
+          vertices: <Vector3>[
+            Vector3(2.5, -0.5, -0.5),
+            Vector3(3.5, -0.5, -0.5),
+            Vector3(3, 0.5, -0.5),
+            Vector3(3, 0, 0.5),
+          ],
+        ),
+        isTrue,
+      );
+      physics.advance(1 / 60);
+      expect(physics.bodyCount, 2);
+      expect(
+        physics.overlapBody('soft-proxy')
+            .any((hit) => hit.bodyId == 'contact-probe'),
+        isFalse,
+      );
+
+      // Degenerate geometry must not replace the last valid native hull or
+      // abort the next simulation frame. The next update can retry cooking.
+      expect(
+        physics.updateKinematicConvexHull(
+          id: 'soft-proxy',
+          vertices: <Vector3>[
+            Vector3.zero(),
+            Vector3(1, 0, 0),
+            Vector3(2, 0, 0),
+            Vector3(3, 0, 0),
+          ],
+        ),
+        isFalse,
+      );
+      expect(() => physics.advance(1 / 60), returnsNormally);
+      expect(
+        physics.overlapBody('soft-proxy')
+            .any((hit) => hit.bodyId == 'contact-probe'),
+        isFalse,
+      );
+    });
+
     test('supports constraints and preserves joint graph during body teleports', () {
       physics.addDynamicBox(
         id: 'joint-a',

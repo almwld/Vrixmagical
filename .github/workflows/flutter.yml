@@ -62,18 +62,36 @@ jobs:
         run: dart run mediapipe_core:bundle_models
 
       - name: Format source
-        run: dart format lib test packages/vrix_soft_body/lib
+        run: dart format lib test packages/vrix_soft_body/lib packages/flutter_reality_vrix/lib packages/flutter_reality_vrix/test
 
       - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib
+        run: dart format --output=none --set-exit-if-changed lib test packages/vrix_soft_body/lib packages/flutter_reality_vrix/lib packages/flutter_reality_vrix/test
 
-      - name: Analyze app and native plugin Dart API
+      - name: Analyze app and integrated Flutter plugin Dart APIs
         run: |
-          flutter analyze --no-fatal-infos
-          dart analyze packages/vrix_soft_body
+          flutter analyze --no-fatal-infos lib test packages/vrix_soft_body packages/flutter_reality_vrix
+
+      - name: Generate, analyze and test the vendored just_jolt package independently
+        working-directory: just-jolt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          dart pub get
+          dart run ffigen --config ffigen.yaml
+          dart analyze lib test
+          dart test --reporter expanded
 
       - name: Unit and widget tests
+        env:
+          # Exercise the same native XPBD ABI in host integration tests.
+          LD_LIBRARY_PATH: /tmp/vrix-soft-body-native
         run: flutter test --reporter expanded
+
+      - name: Flutter AR plugin package tests
+        working-directory: packages/flutter_reality_vrix
+        run: |
+          flutter pub get
+          flutter test --reporter expanded
 
       - name: Android debug APK
         run: flutter build apk --debug
@@ -104,14 +122,51 @@ jobs:
       - name: Android split release APKs
         run: flutter build apk --release --split-per-abi
 
-      - name: Verify split APK outputs and native libraries
+      - name: Verify split APK outputs, signatures and native libraries
+        shell: bash
         run: |
-          ls -lh build/app/outputs/flutter-apk/app-*-release.apk
-          ARM64_APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-          test -s "$ARM64_APK"
-          unzip -Z1 "$ARM64_APK" | tee /tmp/split-arm64-files.txt
-          grep -Ei '^lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/split-arm64-files.txt
-          grep -F 'lib/arm64-v8a/libvrix_soft_body.so' /tmp/split-arm64-files.txt
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            apk="build/app/outputs/flutter-apk/app-${abi}-release.apk"
+            test -s "$apk"
+            "$APKSIGNER" verify --verbose "$apk"
+            contents="$(unzip -Z1 "$apk")"
+            grep -F "lib/$abi/" <<<"$contents"
+            if [[ "$abi" == "arm64-v8a" ]]; then
+              # The soft-body plugin currently ships arm64-v8a only.
+              # Require native physics libraries on the supported production ABI.
+              grep -Ei "^lib/$abi/[^/]*jolt[^/]*\\.so$" <<<"$contents"
+              grep -F "lib/$abi/libvrix_soft_body.so" <<<"$contents"
+              echo "Verified signed APK and native physics libraries for $abi: $(stat -c%s "$apk") bytes"
+            else
+              echo "Verified signed Flutter split APK for $abi (native physics plugin is arm64-v8a only): $(stat -c%s "$apk") bytes"
+            fi
+          done
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-arm64-v8a
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-armeabi-v7a
+          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-x86_64
+          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Android release App Bundle
         run: flutter build appbundle --release
@@ -122,13 +177,26 @@ jobs:
           grep -Ei '^base/lib/arm64-v8a/[^/]*jolt[^/]*\.so$' /tmp/release-aab-files.txt
           grep -F 'base/lib/arm64-v8a/libvrix_soft_body.so' /tmp/release-aab-files.txt
 
-      - name: Upload release artifacts
+      - name: Upload universal release APK
         uses: actions/upload-artifact@v4
         with:
-          name: virxmagical-release-apk-and-aab
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/app-release.aab
+          name: virxmagical-universal-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Upload Android App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: virxmagical-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify regenerated just_jolt FFI bindings are committed
+        run: |
+          if ! git diff --quiet -- just-jolt/lib/src/native/bindings.g.dart; then
+            echo "::error::Generated FFI bindings are stale. Regenerate them locally and commit the updated bindings."
+            git diff --stat -- just-jolt/lib/src/native/bindings.g.dart
+            exit 1
+          fi

@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+
 import 'app_theme.dart';
 import '../features/home/home_screen.dart';
 
@@ -10,6 +11,16 @@ class VirxMagicalApp extends StatelessWidget {
     title: 'VirxMagical',
     debugShowCheckedModeBanner: false,
     theme: AppTheme.dark,
-    home: const HomeScreen(),
+    locale: const Locale('ar'),
+    supportedLocales: const [Locale('ar')],
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
+    home: const Directionality(
+      textDirection: TextDirection.rtl,
+      child: HomeScreen(),
+    ),
+    builder: (context, child) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: child ?? const SizedBox.shrink(),
+    ),
   );
 }

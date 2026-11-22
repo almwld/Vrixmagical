@@ -10,8 +10,8 @@ void* vrix_soft_body_create(const float*, int, const uint32_t*, int,
 int vrix_soft_body_step(void*, float);
 int vrix_soft_body_set_point_target(void*, int, const float*, float);
 int vrix_soft_body_read_state(void*, float*, float*, int);
-int vrix_soft_body_set_contact(void*, int, const float*, const float*, float, float);
-int vrix_soft_body_clear_contact(void*, int);
+int vrix_soft_body_set_contact(void*, int, int, const float*, const float*, float, float);
+int vrix_soft_body_clear_contact(void*, int, int);
 int vrix_soft_body_read_reaction_forces(void*, float*, int);
 void vrix_soft_body_destroy(void*);
 }
@@ -92,11 +92,18 @@ int main() {
 
   const float contact_point[] = {0.9f, 0.0f, 0.0f};
   const float contact_normal[] = {-1.0f, 0.0f, 0.0f};
-  if (vrix_soft_body_set_contact(body, 1, contact_point, contact_normal,
+  if (vrix_soft_body_set_contact(body, 1, 0, contact_point, contact_normal,
                                  0.4f, 0.0f) != 1) {
     std::fprintf(stderr, "XPBD rejected a valid unilateral contact.\\n");
     vrix_soft_body_destroy(body);
     return 8;
+  }
+  const float second_contact_point[] = {0.8f, 0.0f, 0.0f};
+  if (vrix_soft_body_set_contact(body, 1, 1, second_contact_point, contact_normal,
+                                 0.4f, 0.0f) != 1) {
+    std::fprintf(stderr, "XPBD rejected a second simultaneous contact slot.\\n");
+    vrix_soft_body_destroy(body);
+    return 15;
   }
   for (int frame = 0; frame < 30; ++frame) {
     if (vrix_soft_body_step(body, 1.0f / 60.0f) < 1) {
@@ -112,15 +119,16 @@ int main() {
     vrix_soft_body_destroy(body);
     return 10;
   }
-  std::vector<float> reactions(12);
-  if (vrix_soft_body_read_reaction_forces(body, reactions.data(), 4) != 4 ||
-      !finite_state(reactions) || reactions[3] <= 0.0f) {
+  std::vector<float> reactions(4 * 4 * 3);
+  if (vrix_soft_body_read_reaction_forces(body, reactions.data(), 4 * 4) != 4 * 4 ||
+      !finite_state(reactions) || reactions[15] <= 0.0f || reactions[12] <= 0.0f) {
     std::fprintf(stderr, "XPBD did not return a finite rigid-surface reaction.\\n");
     vrix_soft_body_destroy(body);
     return 11;
   }
 
-  if (vrix_soft_body_clear_contact(body, 1) != 1) {
+  if (vrix_soft_body_clear_contact(body, 1, 0) != 1 ||
+      vrix_soft_body_clear_contact(body, 1, 1) != 1) {
     std::fprintf(stderr, "XPBD failed to clear an active contact.\\n");
     vrix_soft_body_destroy(body);
     return 12;
@@ -133,7 +141,7 @@ int main() {
     }
   }
   std::fill(reactions.begin(), reactions.end(), 0.0f);
-  if (vrix_soft_body_read_reaction_forces(body, reactions.data(), 4) != 4 ||
+  if (vrix_soft_body_read_reaction_forces(body, reactions.data(), 4 * 4) != 4 * 4 ||
       !finite_state(reactions) ||
       std::any_of(reactions.begin(), reactions.end(), [](float v) { return std::abs(v) > 1e-6f; })) {
     std::fprintf(stderr, "XPBD retained stale reactions after contact removal.\\n");

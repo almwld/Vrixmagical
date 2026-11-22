@@ -3,6 +3,7 @@ import 'package:flutter_reality/models/ar_node.dart';
 import 'package:flutter_reality/src/generated/messages.g.dart';
 import 'package:flutter_reality/utils/json_converters.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 // Type definitions to enforce a consistent use of the API
@@ -41,6 +42,7 @@ typedef NodeErrorHandler = void Function(String error);
 /// Manages the all node-related actions of an [ARView]
 class ARObjectManager {
   late ARObjectHostApi _hostApi;
+  final MethodChannel _meshChannel;
 
   /// Debugging status flag. If true, all platform calls are printed. Defaults to false.
   final bool debug;
@@ -73,7 +75,8 @@ class ARObjectManager {
   /// Creates the object manager for the [ARView] platform view identified by
   /// [id]. Consumers normally receive an already-constructed instance
   /// through [ARViewCreatedCallback] rather than calling this directly.
-  ARObjectManager(int id, {this.debug = false}) {
+  ARObjectManager(int id, {this.debug = false})
+      : _meshChannel = MethodChannel('flutter_reality/mesh_$id') {
     final suffix = id.toString();
     _hostApi = ARObjectHostApi(messageChannelSuffix: suffix);
     ARObjectFlutterApi.setUp(_ObjectEventHandler(this),
@@ -122,6 +125,91 @@ class ARObjectManager {
       print('Error caught: ' + e.toString());
       _removeTransformListener(node);
       return false;
+    }
+  }
+
+  /// Adds a renderer-backed deformable triangle mesh to this AR scene.
+  ///
+  /// Positions are packed XYZ values in object-local metres. Indices are
+  /// triangle-list indices. The native Filament node owns the GPU buffers;
+  /// callers update only the positions on subsequent frames.
+  Future<bool> addDeformableMesh({
+    required String id,
+    required List<double> positions,
+    required List<int> triangleIndices,
+    required Matrix4 worldTransform,
+    int color = 0xFF0A8F83,
+    double metallic = 0.05,
+    double roughness = 0.72,
+  }) async {
+    _validateDeformableMesh(
+      id: id,
+      positions: positions,
+      triangleIndices: triangleIndices,
+      worldTransform: worldTransform,
+    );
+    if (!metallic.isFinite || metallic < 0 || metallic > 1 ||
+        !roughness.isFinite || roughness < 0 || roughness > 1) {
+      throw ArgumentError('Deformable mesh PBR values must be in [0, 1].');
+    }
+    final added = await _meshChannel.invokeMethod<bool>('add', {
+      'id': id,
+      'positions': positions,
+      'indices': triangleIndices,
+      'transform': worldTransform.storage.toList(growable: false),
+      'color': color,
+      'metallic': metallic,
+      'roughness': roughness,
+    });
+    return added ?? false;
+  }
+
+  /// Uploads a new XPBD surface frame to an existing AR mesh.
+  ///
+  /// Topology is immutable for the lifetime of a mesh; only vertex positions
+  /// and its object transform may change. Keep uploads bounded (normally 10–15
+  /// Hz on mobile) rather than sending every solver substep over the channel.
+  Future<void> updateDeformableMesh({
+    required String id,
+    required List<double> positions,
+    required Matrix4 worldTransform,
+  }) async {
+    if (id.trim().isEmpty || positions.isEmpty ||
+        positions.length % 3 != 0 || positions.length ~/ 3 > 25000 ||
+        positions.any((value) => !value.isFinite) ||
+        worldTransform.storage.any((value) => !value.isFinite) ||
+        worldTransform.determinant().abs() <= 1e-12) {
+      throw ArgumentError('Invalid deformable mesh update frame.');
+    }
+    await _meshChannel.invokeMethod<void>('update', {
+      'id': id,
+      'positions': positions,
+      'transform': worldTransform.storage.toList(growable: false),
+    });
+  }
+
+  Future<void> removeDeformableMesh(String id) =>
+      _meshChannel.invokeMethod<void>('remove', {'id': id});
+
+  static void _validateDeformableMesh({
+    required String id,
+    required List<double> positions,
+    required List<int> triangleIndices,
+    required Matrix4 worldTransform,
+  }) {
+    if (id.trim().isEmpty ||
+        positions.length < 12 ||
+        positions.length % 3 != 0 ||
+        positions.length ~/ 3 > 25000 ||
+        triangleIndices.isEmpty ||
+        triangleIndices.length % 3 != 0 ||
+        triangleIndices.length > 150000 ||
+        positions.any((value) => !value.isFinite) ||
+        triangleIndices.any((index) =>
+            index < 0 || index >= positions.length ~/ 3) ||
+        worldTransform.storage.any((value) => !value.isFinite) ||
+        worldTransform.determinant().abs() <= 1e-12) {
+      throw ArgumentError('Invalid or over-budget deformable mesh buffers.');
     }
   }
 

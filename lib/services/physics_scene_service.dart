@@ -69,6 +69,7 @@ class _ShapeSpec {
 class _BodyRecord {
   _BodyRecord({
     required this.id,
+    required this.identity,
     required this.shape,
     required this.motionType,
     required this.transform,
@@ -85,7 +86,8 @@ class _BodyRecord {
   });
 
   final String id;
-  final _ShapeSpec shape;
+  final int identity;
+  _ShapeSpec shape;
   int motionType;
   Matrix4 transform;
   final double friction;
@@ -186,6 +188,7 @@ class PhysicsSceneService {
   final StreamController<PhysicsContactEvent> _eventController =
       StreamController<PhysicsContactEvent>.broadcast(sync: true);
   double _accumulator = 0;
+  int _bodyIdentityCounter = 0;
   bool _disposed = false;
 
   int get bodyCount => _bodies.length;
@@ -234,6 +237,112 @@ class PhysicsSceneService {
       sensor: false,
       continuous: false,
     );
+  }
+
+  /// Adds a kinematic convex proxy for soft-body broadphase contacts.
+  /// Sensor mode prevents Jolt from resolving the same contact twice; XPBD
+  /// remains the owner of deformable response.
+  void addKinematicConvexHull({
+    required String id,
+    required Matrix4 worldTransform,
+    required List<Vector3> vertices,
+    double maxConvexRadius = 0.02,
+    double friction = 0.6,
+    bool sensor = false,
+  }) {
+    if (vertices.length < 4 || vertices.length > 4096) {
+      throw ArgumentError.value(vertices.length, 'vertices.length');
+    }
+    _validatePositive(maxConvexRadius, 'maxConvexRadius');
+    if (vertices.any((vertex) => !_isFiniteVector(vertex))) {
+      throw ArgumentError('Convex hull vertices must be finite.');
+    }
+    final flattened = <double>[
+      for (final vertex in vertices) ...<double>[vertex.x, vertex.y, vertex.z],
+    ];
+    _addBody(
+      id: id,
+      shape: _ShapeSpec(
+        _ShapeKind.convexHull,
+        flattened,
+        convexRadius: maxConvexRadius,
+      ),
+      motionType: jolt.JJ_MOTION_KINEMATIC,
+      worldTransform: worldTransform,
+      friction: friction,
+      restitution: 0,
+      gravityFactor: 0,
+      mass: 0,
+      layer: 1,
+      sensor: sensor,
+      continuous: !sensor,
+    );
+  }
+
+  /// Re-cooks and replaces a kinematic convex hull without destroying its body.
+  /// The body ID, sensor configuration, and event identity remain stable.
+  bool updateKinematicConvexHull({
+    required String id,
+    required List<Vector3> vertices,
+  }) {
+    _ensureAvailable();
+    final record = _bodies[id];
+    if (record == null) throw StateError('Unknown physics body: $id');
+    if (record.motionType != jolt.JJ_MOTION_KINEMATIC ||
+        record.shape.kind != _ShapeKind.convexHull) {
+      throw StateError('Body $id is not a kinematic convex-hull proxy.');
+    }
+    if (vertices.length < 4 || vertices.length > 4096 ||
+        vertices.any((vertex) => !_isFiniteVector(vertex))) {
+      throw ArgumentError('Updated convex hull must contain 4..4096 finite vertices.');
+    }
+    final nextShape = _ShapeSpec(
+      _ShapeKind.convexHull,
+      <double>[
+        for (final vertex in vertices) ...<double>[vertex.x, vertex.y, vertex.z],
+      ],
+      convexRadius: record.shape.convexRadius,
+    );
+    final updated = using((arena) {
+      // Convex-hull cooking reports invalid/degenerate geometry as a
+      // StateError. Treat that as a rejected proxy update, not a fatal frame:
+      // XPBD remains authoritative and the previous Jolt hull stays installed.
+      final nativeShape = (() {
+        try {
+          return _createShape(arena, nextShape);
+        } on StateError {
+          return nullptr.cast<jolt.JPH_Shape>();
+        }
+      })();
+      if (nativeShape.address == 0) return false;
+      try {
+        jolt.JPH_BodyInterface_SetShape(
+          _getBodyInterface(),
+          record.handle,
+          nativeShape,
+          false,
+          jolt.JPH_Activation.JPH_Activation_Activate,
+        );
+      } finally {
+        jolt.jj_shape_release(nativeShape.cast<Void>());
+      }
+      return true;
+    });
+    if (!updated) return false;
+    record.shape = nextShape;
+    return true;
+  }
+
+  /// Stable for one body lifetime; changes when an ID is removed and reused.
+  int? bodyIdentity(String id) {
+    _ensureAvailable();
+    return _bodies[id]?.identity;
+  }
+
+  /// True only for dynamic bodies that can receive XPBD reaction impulses.
+  bool isDynamicBody(String id) {
+    _ensureAvailable();
+    return _bodies[id]?.motionType == jolt.JJ_MOTION_DYNAMIC;
   }
 
   void addDynamicBox({
@@ -473,6 +582,7 @@ class PhysicsSceneService {
     _toPose(worldTransform);
     final record = _BodyRecord(
       id: id,
+      identity: ++_bodyIdentityCounter,
       shape: shape,
       motionType: motionType,
       transform: Matrix4.copy(worldTransform),
@@ -1183,6 +1293,56 @@ class PhysicsSceneService {
       } finally {
         jolt.jj_shape_release(shape.cast<Void>());
       }
+    });
+  }
+
+  /// Queries the live shape of a body against the rest of this world.
+  ///
+  /// The queried body is excluded from its own results. Jolt returns one
+  /// deepest overlap hit per other body, with a world-space surface normal
+  /// facing the query shape.
+  List<PhysicsRaycastHit> overlapBody(
+    String bodyId, {
+    int layerMask = 0xFFFF,
+    bool includeSensors = false,
+    int maxHits = 64,
+  }) {
+    _ensureAvailable();
+    if (maxHits < 1 ||
+        maxHits > 4096 ||
+        layerMask < 0 ||
+        layerMask > 0xFFFF) {
+      throw ArgumentError('Invalid body-overlap query limits.');
+    }
+    final record = _bodies[bodyId];
+    if (record == null) {
+      throw ArgumentError.value(bodyId, 'bodyId', 'Unknown physics body.');
+    }
+    final shape = jolt.JPH_BodyInterface_GetShape(
+      _getBodyInterface(),
+      record.handle,
+    );
+    if (shape.address == 0) {
+      throw StateError('Jolt could not read the shape for $bodyId.');
+    }
+    final pose = _toPose(bodyWorldTransform(bodyId));
+    return using((arena) {
+      final poseBuffer = _poseBuffer(arena, pose);
+      final hits = arena<jolt.JJ_Hit>(maxHits);
+      var flags = jolt.JJ_QUERY_ALL_HITS;
+      if (includeSensors) flags |= jolt.JJ_QUERY_SENSORS;
+      final count = jolt.jj_overlap(
+        _world,
+        shape,
+        poseBuffer,
+        layerMask,
+        record.handle,
+        flags,
+        hits,
+        maxHits,
+      );
+      if (count < 0) throw StateError('Jolt body-overlap query failed: $count');
+      return _mapHits(hits, math.min(count, maxHits).toInt());
     });
   }
 

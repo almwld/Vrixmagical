@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../app/app_theme.dart';
 import '../../services/object_library_catalog.dart';
+import '../../services/model_arabic_labels.dart';
+import '../studio/ar_scene_screen.dart';
 
 class ObjectLibraryScreen extends StatefulWidget {
   const ObjectLibraryScreen({super.key});
@@ -28,7 +31,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
     try {
       final selection = await FilePicker.pickFile(
         type: FileType.custom,
-        allowedExtensions: const ['glb', 'gltf'],
+        allowedExtensions: const ['glb'],
       );
       final path = selection?.path;
       if (path == null) return;
@@ -50,13 +53,49 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
     }
   }
 
+
+  String _absolutePath(ObjectLibraryStore store, CatalogAsset asset) =>
+      '${store.rootDirectory.path}/${asset.object.meshPath}';
+
+  Future<void> _openInEngine(ObjectLibraryStore store, CatalogAsset asset) async {
+    final path = _absolutePath(store, asset);
+    if (!await File(path).exists()) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ملف المجسم غير موجود في التخزين المحلي.')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ArSceneScreen(modelPath: path),
+    ));
+  }
+
+  Future<void> _downloadModel(ObjectLibraryStore store, CatalogAsset asset) async {
+    try {
+      final path = _absolutePath(store, asset);
+      final file = File(path);
+      if (!await file.exists()) throw const FileSystemException('ملف GLB غير موجود.');
+      final bytes = await file.readAsBytes();
+      final name = asset.object.displayName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_') + '.glb';
+      final saved = await FilePicker.saveFile(fileName: name, bytes: bytes, type: FileType.custom, allowedExtensions: const ['glb']);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(saved == null ? 'أُلغي التصدير.' : 'تم حفظ ملف المجسم.')),
+      );
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذّر تنزيل ملف GLB: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
           title: const Text('مكتبة الأصول'),
           actions: [
             IconButton(
-              tooltip: 'استيراد GLB / GLTF',
+              tooltip: 'استيراد GLB',
               onPressed: _importing ? null : _importModel,
               icon: _importing
                   ? const SizedBox(
@@ -118,7 +157,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                       ),
                       SizedBox(height: 7),
                       Text(
-                        'استورد نماذج GLB وGLTF محلياً، واحتفظ بهويتها ووسومها وملفها الفيزيائي في فهرس واحد.',
+                        'استورد نماذج GLB محلياً، واحتفظ بهويتها ووسومها وملفها الفيزيائي في فهرس واحد.',
                         style: TextStyle(
                             color: Color(0xFFB5C5D8),
                             fontSize: 11,
@@ -179,7 +218,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                         ),
                         SizedBox(height: 6),
                         Text(
-                          'اضغط زر الإضافة لاستيراد نموذج GLB أو GLTF. ستُحفظ الملفات محلياً مع بياناتها.',
+                          'اضغط زر الإضافة لاستيراد ملف GLB مستقل بخاماته المضمنة. ستُحفظ الملفات محلياً مع بياناتها.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               color: AppColors.muted,
@@ -207,7 +246,7 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(asset.object.displayName,
+                                  Text(ModelArabicLabels.displayName(asset.object.displayName),
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w800)),
                                   const SizedBox(height: 4),
@@ -226,6 +265,19 @@ class _ObjectLibraryScreenState extends State<ObjectLibraryScreen> {
                                 ],
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            Column(mainAxisSize: MainAxisSize.min, children: [
+                              IconButton(
+                                tooltip: 'فتح في محرك الواقع المعزز',
+                                onPressed: () => _openInEngine(store, asset),
+                                icon: const Icon(Icons.view_in_ar_rounded, color: AppColors.primary),
+                              ),
+                              IconButton(
+                                tooltip: 'تنزيل ملف GLB',
+                                onPressed: () => _downloadModel(store, asset),
+                                icon: const Icon(Icons.download_rounded, color: AppColors.secondary),
+                              ),
+                            ]),
                           ],
                         ),
                       )),

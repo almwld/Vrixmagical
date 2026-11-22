@@ -17,6 +17,8 @@ import '../../app/app_theme.dart';
 import '../../domain/vrix_object.dart';
 import '../../services/physics_scene_service.dart';
 import '../../services/lg_wing_deck_service.dart';
+import '../../services/model_arabic_labels.dart';
+import '../../services/ar_session_hand_perception.dart';
 
 class _PlacedAsset {
   const _PlacedAsset({
@@ -37,7 +39,9 @@ class _PlacedAsset {
 }
 
 class ArSceneScreen extends StatefulWidget {
-  const ArSceneScreen({super.key});
+  const ArSceneScreen({super.key, this.modelPath});
+
+  final String? modelPath;
 
   @override
   State<ArSceneScreen> createState() => _ArSceneScreenState();
@@ -58,6 +62,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
   bool _busy = false;
   bool _physicsFaultReported = false;
   bool _physicsEnabled = true;
+  ArSessionHandPerception? _handPerception;
+  bool _handTrackingEnabled = false;
   double _touchThreshold = 0.18;
   int _telemetryFrames = 0;
   DateTime _telemetryWindow = DateTime.now();
@@ -75,9 +81,11 @@ class _ArSceneScreenState extends State<ArSceneScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _startPhysicsTicker();
+      if (_handTrackingEnabled) unawaited(_resumeArHandTracking());
     } else {
       _stopPhysicsTicker();
       _physics?.resetAccumulator();
+      unawaited(_handPerception?.stop() ?? Future<void>.value());
     }
   }
 
@@ -125,7 +133,7 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     // only after the user explicitly places the first object.
     if (mounted) {
       setState(() {
-        _status = 'كاميرا الواقع المعزز جاهزة · الفيزياء ستُهيّأ عند تثبيت أول مجسم.';
+        _status = widget.modelPath == null ? 'كاميرا الواقع المعزز جاهزة · اضغط سطحاً لإضافة النموذج التجريبي.' : 'جاهز لإدراج المجسم المحلي عند لمس سطح مكتشف.';
       });
     }
   }
@@ -224,14 +232,78 @@ class _ArSceneScreenState extends State<ArSceneScreen>
         if (value is num) _touchThreshold = value.toDouble().clamp(0.0, 1.0).toDouble();
         break;
       case 'handTrackingInfo':
-        setState(() { _status = 'MediaPipe يعمل حالياً في وحدة مرآة اليد؛ لم يُدمج بعد داخل جلسة AR لتجنب تعارض الكاميرا.'; });
+        unawaited(_toggleArHandTracking());
         break;
       case 'scanInfo':
-        setState(() { _status = 'بيانات RGB-D تحفظ من وحدة مسح الأجسام. دمج Voxel Fusion وإعادة بناء GLB لم يكتمل بعد.'; });
+        setState(() { _status = 'مسح RGB-D ودمج النقاط وإعادة بناء شبكة GLB متاح من وحدة المسح؛ تحقق من نتيجة كل مسح قبل التصدير.'; });
         break;
       case 'hideDeck':
         unawaited(LgWingDeckService.instance.hide());
         break;
+    }
+  }
+
+  Future<void> _toggleArHandTracking() async {
+    if (_handTrackingEnabled) {
+      _handTrackingEnabled = false;
+      final controller = _handPerception;
+      _handPerception = null;
+      await controller?.dispose();
+      if (mounted) setState(() => _status = 'تم إيقاف تتبع اليد داخل جلسة AR.');
+      return;
+    }
+    final session = _session;
+    if (session == null) {
+      if (mounted) setState(() => _status = 'انتظر اكتمال تهيئة جلسة AR قبل تشغيل تتبع اليد.');
+      return;
+    }
+    final controller = ArSessionHandPerception(
+      onObservation: _onArHandObservation,
+      onError: (error) {
+        if (mounted) setState(() => _status = 'تعذّر تحليل إطار AR بواسطة MediaPipe: $error');
+      },
+    );
+    try {
+      await controller.start(session);
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      _handPerception = controller;
+      _handTrackingEnabled = true;
+      setState(() => _status = 'MediaPipe متصل بكاميرا ARCore نفسها · أظهر يدك أمام الكاميرا.');
+    } catch (error) {
+      await controller.dispose();
+      if (mounted) setState(() => _status = 'فشل تشغيل MediaPipe داخل AR: $error');
+    }
+  }
+
+  Future<void> _resumeArHandTracking() async {
+    final session = _session;
+    final controller = _handPerception;
+    if (session == null || controller == null || controller.isRunning) return;
+    try {
+      await controller.start(session);
+    } catch (error) {
+      if (mounted) setState(() => _status = 'تعذّر استئناف تتبع اليد بعد العودة إلى AR: $error');
+    }
+  }
+
+  void _onArHandObservation(ArHandObservation observation) {
+    if (!mounted || !_handTrackingEnabled) return;
+    for (final hand in observation.hands) {
+      if (!hand.isPinching) continue;
+      final tip = hand.indexTipWorld;
+      if (tip == null) {
+        setState(() => _status = 'تم رصد قبضة ${hand.handedness}، لكن العمق غير متاح لتحديد نقطة التلامس ثلاثية الأبعاد.');
+      } else {
+        setState(() => _status =
+            'تلامس ${hand.handedness} ثلاثي الأبعاد · '
+            'X ${tip.x.toStringAsFixed(2)}m · '
+            'Y ${tip.y.toStringAsFixed(2)}m · '
+            'Z ${tip.z.toStringAsFixed(2)}m');
+      }
+      return;
     }
   }
 
@@ -298,8 +370,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       anchorWasAdded = true;
 
       final node = ARNode(
-        type: NodeType.webGLB,
-        uri: _sampleModel,
+        type: widget.modelPath == null ? NodeType.webGLB : NodeType.fileSystemAppFolderGLB,
+        uri: widget.modelPath ?? _sampleModel,
         position: Vector3(0, 0.16, 0),
         scale: Vector3(0.12, 0.12, 0.12),
       );
@@ -314,8 +386,10 @@ class _ArSceneScreenState extends State<ArSceneScreen>
       final identity = VrixObject(
         id: node.name,
         source: ObjectSource.library,
-        displayName: 'Duck sample',
-        meshPath: _sampleModel,
+        displayName: widget.modelPath == null
+            ? 'بطة'
+            : ModelArabicLabels.displayName(widget.modelPath!.split('/').last.replaceAll('.glb', '')),
+        meshPath: widget.modelPath ?? _sampleModel,
         physics: const PhysicsProfile(
           mass: 1,
           collider: ColliderShape.box,
@@ -400,8 +474,8 @@ class _ArSceneScreenState extends State<ArSceneScreen>
           ),
         );
         _status = physics == null
-            ? 'تم تثبيت المجسم · محرك الفيزياء غير متاح.'
-            : 'تم تثبيت المجسم · تصادم وجاذبية Jolt مفعّلان.';
+            ? 'تم تثبيت ${identity.displayName} · محرك الفيزياء غير متاح.'
+            : 'تم تثبيت ${identity.displayName} · تصادم وجاذبية Jolt مفعّلان.';
       });
     } catch (error) {
       if (dynamicBodyId != null) _physics?.removeBody(dynamicBodyId);
@@ -434,8 +508,15 @@ class _ArSceneScreenState extends State<ArSceneScreen>
     WidgetsBinding.instance.removeObserver(this);
     unawaited(LgWingDeckService.instance.hide());
     _stopPhysicsTicker();
+    _handTrackingEnabled = false;
+    final handPerception = _handPerception;
+    final session = _session;
+    _handPerception = null;
     _physics?.dispose();
-    _session?.dispose();
+    unawaited(() async {
+      await handPerception?.dispose();
+      await session?.dispose();
+    }());
     super.dispose();
   }
 

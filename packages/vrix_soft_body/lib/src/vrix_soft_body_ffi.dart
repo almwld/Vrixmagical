@@ -20,13 +20,13 @@ typedef _TargetDart = int Function(Pointer<Void>, int, Pointer<Float>, double);
 typedef _ClearTargetNative = Int32 Function(Pointer<Void>, Int32);
 typedef _ClearTargetDart = int Function(Pointer<Void>, int);
 typedef _ContactNative = Int32 Function(
-  Pointer<Void>, Int32, Pointer<Float>, Pointer<Float>, Float, Float,
+  Pointer<Void>, Int32, Int32, Pointer<Float>, Pointer<Float>, Float, Float,
 );
 typedef _ContactDart = int Function(
-  Pointer<Void>, int, Pointer<Float>, Pointer<Float>, double, double,
+  Pointer<Void>, int, int, Pointer<Float>, Pointer<Float>, double, double,
 );
-typedef _ClearContactNative = Int32 Function(Pointer<Void>, Int32);
-typedef _ClearContactDart = int Function(Pointer<Void>, int);
+typedef _ClearContactNative = Int32 Function(Pointer<Void>, Int32, Int32);
+typedef _ClearContactDart = int Function(Pointer<Void>, int, int);
 typedef _ReadReactionsNative = Int32 Function(Pointer<Void>, Pointer<Float>, Int32);
 typedef _ReadReactionsDart = int Function(Pointer<Void>, Pointer<Float>, int);
 typedef _ReadNative = Int32 Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, Int32);
@@ -40,7 +40,7 @@ class _BodyBuffers {
   _BodyBuffers(int vertexCount)
       : positions = calloc<Float>(vertexCount * 3),
         velocities = calloc<Float>(vertexCount * 3),
-        reactions = calloc<Float>(vertexCount * 3);
+        reactions = calloc<Float>(vertexCount * 4 * 3);
 
   final Pointer<Float> positions;
   final Pointer<Float> velocities;
@@ -91,6 +91,8 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
   final _DestroyDart _destroy;
   final String backendName;
   final Map<int, int> _vertexCounts = <int, int>{};
+  final Map<int, double> _fixedTimeSteps = <int, double>{};
+  final Map<int, double> _lastStepDurations = <int, double>{};
   final Map<int, _BodyBuffers> _buffers = <int, _BodyBuffers>{};
   bool _disposed = false;
 
@@ -126,10 +128,14 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
         throw StateError('Native XPBD rejected the tetrahedral mesh or material settings.');
       }
       _vertexCounts[pointer.address] = mesh.vertexCount;
+      _fixedTimeSteps[pointer.address] = config.fixedTimeStepSeconds;
+      _lastStepDurations[pointer.address] = 0;
       try {
         _buffers[pointer.address] = _BodyBuffers(mesh.vertexCount);
       } catch (_) {
         _vertexCounts.remove(pointer.address);
+        _fixedTimeSteps.remove(pointer.address);
+        _lastStepDurations.remove(pointer.address);
         _destroy(pointer);
         rethrow;
       }
@@ -147,9 +153,11 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
       throw ArgumentError.value(deltaSeconds, 'deltaSeconds');
     }
     for (final address in _vertexCounts.keys.toList(growable: false)) {
-      if (_step(Pointer<Void>.fromAddress(address), deltaSeconds) < 0) {
+      final substeps = _step(Pointer<Void>.fromAddress(address), deltaSeconds);
+      if (substeps < 0) {
         throw StateError('Native XPBD step failed for body $address.');
       }
+      _lastStepDurations[address] = substeps * _fixedTimeSteps[address]!;
     }
   }
 
@@ -202,18 +210,20 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
     required int vertexIndex,
     required List<double> point,
     required List<double> normal,
+    int contactSlot = 0,
     double friction = 0.5,
     double compliance = 0,
   }) {
     _ensureActive();
     final count = _requireBody(body);
     if (vertexIndex < 0 || vertexIndex >= count ||
+        contactSlot < 0 || contactSlot >= 4 ||
         point.length != 3 || normal.length != 3 ||
         point.any((v) => !v.isFinite) || normal.any((v) => !v.isFinite) ||
         normal.fold<double>(0, (sum, v) => sum + v * v) <= 1e-16 ||
         !friction.isFinite || friction < 0 ||
         !compliance.isFinite || compliance < 0) {
-      throw ArgumentError('Invalid XPBD contact geometry or material.');
+      throw ArgumentError('Invalid XPBD contact geometry, slot, or material.');
     }
     final pointBuffer = calloc<Float>(3);
     final normalBuffer = calloc<Float>(3);
@@ -223,7 +233,7 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
         normalBuffer[axis] = normal[axis];
       }
       if (_setContact(
-            Pointer<Void>.fromAddress(body.value), vertexIndex,
+            Pointer<Void>.fromAddress(body.value), vertexIndex, contactSlot,
             pointBuffer, normalBuffer, friction, compliance,
           ) == 0) {
         throw StateError('Native XPBD rejected the contact constraint.');
@@ -237,15 +247,29 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
   void clearContact({
     required SoftBodyHandle body,
     required int vertexIndex,
+    int contactSlot = 0,
   }) {
     _ensureActive();
     final count = _requireBody(body);
-    if (vertexIndex < 0 || vertexIndex >= count) {
-      throw RangeError.value(vertexIndex, 'vertexIndex');
+    if (vertexIndex < 0 || vertexIndex >= count ||
+        contactSlot < 0 || contactSlot >= 4) {
+      throw RangeError('Invalid vertex index or contact slot.');
     }
-    if (_clearContact(Pointer<Void>.fromAddress(body.value), vertexIndex) == 0) {
+    if (_clearContact(
+          Pointer<Void>.fromAddress(body.value), vertexIndex, contactSlot,
+        ) == 0) {
       throw StateError('Native XPBD could not clear the contact constraint.');
     }
+  }
+
+
+  /// Simulated time actually advanced by the most recent [step] for this body.
+  /// This differs from the frame delta when the fixed-step accumulator clamps
+  /// or when a frame does not yet contain a complete solver timestep.
+  double simulatedDeltaSeconds(SoftBodyHandle body) {
+    _ensureActive();
+    _requireBody(body);
+    return _lastStepDurations[body.value]!;
   }
 
   /// Returns packed XYZ reaction forces (newtons) accumulated since last read.
@@ -255,13 +279,13 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
     final count = _requireBody(body);
     final buffers = _buffers[body.value]!;
     final read = _readReactions(
-      Pointer<Void>.fromAddress(body.value), buffers.reactions, count,
+      Pointer<Void>.fromAddress(body.value), buffers.reactions, count * 4,
     );
-    if (read != count) {
+    if (read != count * 4) {
       throw StateError('Native XPBD returned an incomplete reaction buffer.');
     }
     return List<double>.generate(
-      count * 3, (index) => buffers.reactions[index].toDouble(),
+      count * 4 * 3, (index) => buffers.reactions[index].toDouble(),
       growable: false,
     );
   }
@@ -292,6 +316,8 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
   void removeBody(SoftBodyHandle body) {
     _ensureActive();
     if (_vertexCounts.remove(body.value) == null) return;
+    _fixedTimeSteps.remove(body.value);
+    _lastStepDurations.remove(body.value);
     _buffers.remove(body.value)?.dispose();
     _destroy(Pointer<Void>.fromAddress(body.value));
   }
@@ -304,6 +330,8 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
       _destroy(Pointer<Void>.fromAddress(address));
     }
     _vertexCounts.clear();
+    _fixedTimeSteps.clear();
+    _lastStepDurations.clear();
     _buffers.clear();
     _disposed = true;
   }
