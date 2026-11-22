@@ -37,7 +37,7 @@ The AR scene and hand-mirror experience are separate modes. ARCore/ARKit owns th
 | MediaPipe Hand Landmarker | 21 hand landmarks and pinch tracking | Integrated live-stream path; device validation pending |
 | MediaPipe Object Detector | Object labels and bounding boxes | Integrated still-frame analysis |
 | MediaPipe Image Segmenter | Per-pixel category mask | Integrated still-frame analysis |
-| SplatKit Android / Vulkan | Gaussian Splat rendering of SPZ and LODSPLAT worlds | Integrated native Android PlatformView; arm64/Vulkan device validation pending |
+| SplatKit Android / Vulkan | Gaussian Splat rendering of SPZ and LODSPLAT worlds | Native PlatformView plus typed per-view Dart bridge for world/first-GPU-frame events, stats, camera/orbit, quality, motion and GLB collider; physical Vulkan validation pending |
 | EdgeSAM / SAM 2 | Promptable object cut-outs | Research/source reference only; not yet integrated into Android runtime |
 | Depth Anything / AR depth | Metric depth and occlusion | Not yet integrated; ARCore depth support varies by device |
 | NeRF | Alternative scene reconstruction pipeline | Research reference only; not integrated |
