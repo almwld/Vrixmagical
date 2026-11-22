@@ -17,8 +17,9 @@ import '../domain/soft_body_reaction_mapper.dart';
 /// dynamic Jolt bodies. The sensor proxy deliberately prevents Jolt from also
 /// resolving the same rigid contact, avoiding double collision response.
 ///
-/// The proxy follows the XPBD centre of mass; its convex hull is a broadphase
-/// approximation, while XPBD remains the deformable state owner.
+/// The proxy hull is rebuilt from live XPBD positions in object-local space
+/// while its Jolt transform remains anchored to the object's initial pose. The
+/// convex hull is a broadphase approximation; XPBD owns deformable state.
 class CoupledSoftBodyPhysics {
   CoupledSoftBodyPhysics({
     required this.scene,
