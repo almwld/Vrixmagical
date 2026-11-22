@@ -48,7 +48,6 @@ class CoupledSoftBodyPhysics {
       friction: contactFriction,
       sensor: true,
     );
-    _initialCentroid = _centroid(mesh.positions);
   }
 
   final PhysicsSceneService scene;
@@ -92,7 +91,10 @@ class CoupledSoftBodyPhysics {
 
     final before = engine.readState(softBody);
     _refreshProxyGeometry(before.positions);
-    _moveProxyToSoftBodyCentre(before.positions, deltaSeconds);
+    // The proxy hull is rebuilt from XPBD object-local positions. Keep the
+    // kinematic body's transform fixed at the initial object transform;
+    // translating it by the deformed centroid would apply that displacement
+    // twice (once in the hull vertices and once in the body transform).
     final rigidSteps = scene.advance(deltaSeconds);
     _refreshContactsFromJoltOverlaps();
     engine.step(deltaSeconds);
@@ -186,21 +188,6 @@ class CoupledSoftBodyPhysics {
     if (maximumDisplacementSquared <= thresholdSquared) return;
     scene.updateKinematicConvexHull(id: proxyBodyId, vertices: candidate);
     _proxyVertices = candidate;
-  }
-
-  void _moveProxyToSoftBodyCentre(List<double> positions, double dt) {
-    final centre = _centroid(positions);
-    final displacement = centre - _initialCentroid;
-    final target = Matrix4.copy(_initialTransform);
-    // XPBD positions are object-local. Rotate the local centroid displacement
-    // into world space before moving the Jolt proxy; adding it directly would
-    // drift whenever the scanned object is initially rotated.
-    final origin = target.getTranslation();
-    final worldDisplacement =
-        _initialTransform.transform3(displacement) -
-        _initialTransform.transform3(Vector3.zero());
-    target.setTranslation(origin + worldDisplacement);
-    scene.moveKinematic(proxyBodyId, target, deltaSeconds: dt);
   }
 
   void _refreshContactsFromJoltOverlaps() {
@@ -343,19 +330,6 @@ class CoupledSoftBodyPhysics {
       }
     }
     return _NearestVertex(bestIndex, math.sqrt(bestDistanceSquared));
-  }
-
-  Vector3 _centroid(List<double> positions) {
-    if (positions.length != mesh.vertexCount * 3) {
-      throw StateError('XPBD state does not match the coupled mesh vertex count.');
-    }
-    final result = Vector3.zero();
-    for (var i = 0; i < mesh.vertexCount; i++) {
-      result.x += positions[i * 3];
-      result.y += positions[i * 3 + 1];
-      result.z += positions[i * 3 + 2];
-    }
-    return result / mesh.vertexCount.toDouble();
   }
 
   void _ensureActive() {
