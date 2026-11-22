@@ -88,7 +88,10 @@ class CoupledSoftBodyPhysics {
     final rigidSteps = scene.advance(deltaSeconds);
     _refreshContactsFromJoltOverlaps();
     engine.step(deltaSeconds);
-    _applyXpbdReactions(deltaSeconds);
+    // Convert averaged native reaction forces using the time XPBD actually
+    // simulated, not the unbounded wall-clock frame delta. The native fixed-step
+    // accumulator may clamp or defer part of a frame.
+    _applyXpbdReactions(engine.simulatedDeltaSeconds(softBody));
     _coupledSteps++;
     return rigidSteps;
   }

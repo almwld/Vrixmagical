@@ -91,6 +91,8 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
   final _DestroyDart _destroy;
   final String backendName;
   final Map<int, int> _vertexCounts = <int, int>{};
+  final Map<int, double> _fixedTimeSteps = <int, double>{};
+  final Map<int, double> _lastStepDurations = <int, double>{};
   final Map<int, _BodyBuffers> _buffers = <int, _BodyBuffers>{};
   bool _disposed = false;
 
@@ -126,10 +128,14 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
         throw StateError('Native XPBD rejected the tetrahedral mesh or material settings.');
       }
       _vertexCounts[pointer.address] = mesh.vertexCount;
+      _fixedTimeSteps[pointer.address] = config.fixedTimeStepSeconds;
+      _lastStepDurations[pointer.address] = 0;
       try {
         _buffers[pointer.address] = _BodyBuffers(mesh.vertexCount);
       } catch (_) {
         _vertexCounts.remove(pointer.address);
+        _fixedTimeSteps.remove(pointer.address);
+        _lastStepDurations.remove(pointer.address);
         _destroy(pointer);
         rethrow;
       }
@@ -147,9 +153,11 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
       throw ArgumentError.value(deltaSeconds, 'deltaSeconds');
     }
     for (final address in _vertexCounts.keys.toList(growable: false)) {
-      if (_step(Pointer<Void>.fromAddress(address), deltaSeconds) < 0) {
+      final substeps = _step(Pointer<Void>.fromAddress(address), deltaSeconds);
+      if (substeps < 0) {
         throw StateError('Native XPBD step failed for body $address.');
       }
+      _lastStepDurations[address] = substeps * _fixedTimeSteps[address]!;
     }
   }
 
@@ -248,6 +256,15 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
     }
   }
 
+  /// Simulated time actually advanced by the most recent [step] for this body.
+  /// This differs from the frame delta when the fixed-step accumulator clamps
+  /// or when a frame does not yet contain a complete solver timestep.
+  double simulatedDeltaSeconds(SoftBodyHandle body) {
+    _ensureActive();
+    _requireBody(body);
+    return _lastStepDurations[body.value]!;
+  }
+
   /// Returns packed XYZ reaction forces (newtons) accumulated since last read.
   /// Values are the forces exerted by the soft body on the rigid contact surface.
   List<double> readReactionForces(SoftBodyHandle body) {
@@ -292,6 +309,8 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
   void removeBody(SoftBodyHandle body) {
     _ensureActive();
     if (_vertexCounts.remove(body.value) == null) return;
+    _fixedTimeSteps.remove(body.value);
+    _lastStepDurations.remove(body.value);
     _buffers.remove(body.value)?.dispose();
     _destroy(Pointer<Void>.fromAddress(body.value));
   }
@@ -304,6 +323,8 @@ class VrixSoftBodyFfiEngine implements VrixSoftBodyEngine {
       _destroy(Pointer<Void>.fromAddress(address));
     }
     _vertexCounts.clear();
+    _fixedTimeSteps.clear();
+    _lastStepDurations.clear();
     _buffers.clear();
     _disposed = true;
   }
