@@ -477,6 +477,7 @@ JJ_API int32_t jj_shape_cast(int64_t world, const JPH_Shape* shape,
                              uint32_t flags, JJ_Hit* out, int32_t capacity);
 
 /// The bodies [shape] at pose overlaps, one hit each (the deepest point).
+/// Returns -capacity when more unique bodies overlap than fit in [out].
 JJ_API int32_t jj_overlap(int64_t world, const JPH_Shape* shape,
                           const float* pose, uint32_t layerMask,
                           int64_t ignoreBody, uint32_t flags, JJ_Hit* out,

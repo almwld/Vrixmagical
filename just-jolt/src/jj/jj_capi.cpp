@@ -1485,9 +1485,11 @@ int32_t jj_overlap(int64_t world, const JPH_Shape* shapePtr, const float* pose,
       hits[it->second] = hit;
     }
   }
+  // Never silently return a partial contact set: callers must be able to
+  // distinguish a complete query from one truncated by their output buffer.
+  if (hits.size() > static_cast<size_t>(capacity)) return -capacity;
   int32_t n = 0;
   for (const CollideShapeResult& hit : hits) {
-    if (n >= capacity) break;
     Vec3 axis = hit.mPenetrationAxis;
     Vec3 normal = axis.LengthSq() > 1.0e-12f ? -axis.Normalized() : Vec3::sZero();
     writeHit(w, out[n++], hit.mBodyID2, 0, RVec3(hit.mContactPointOn2), normal,
