@@ -121,7 +121,7 @@ int main() {
   }
   std::vector<float> reactions(4 * 4 * 3);
   if (vrix_soft_body_read_reaction_forces(body, reactions.data(), 4 * 4) != 4 * 4 ||
-      !finite_state(reactions) || reactions[15] <= 0.0f || reactions[3] <= 0.0f) {
+      !finite_state(reactions) || reactions[15] <= 0.0f || reactions[12] <= 0.0f) {
     std::fprintf(stderr, "XPBD did not return a finite rigid-surface reaction.\\n");
     vrix_soft_body_destroy(body);
     return 11;
