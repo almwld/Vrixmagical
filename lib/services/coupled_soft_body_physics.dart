@@ -61,7 +61,6 @@ class CoupledSoftBodyPhysics {
   final double proxyShapeUpdateThreshold;
   final Matrix4 _initialTransform;
   late List<Vector3> _proxyVertices;
-  late final Vector3 _initialCentroid;
   final Map<int, Map<String, _ActiveContact>> _contacts =
       <int, Map<String, _ActiveContact>>{};
   bool _disposed = false;
