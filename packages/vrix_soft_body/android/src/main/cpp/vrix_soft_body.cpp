@@ -411,6 +411,14 @@ VRIX_EXPORT int vrix_soft_body_clear_contact(void* handle, int vertex_index,
   if (contacts.size() > static_cast<size_t>(contact_slot)) {
     contacts[static_cast<size_t>(contact_slot)] = ContactConstraint{};
   }
+  // A slot can be reassigned to a different rigid body on the next contact
+  // refresh. Discard any force samples owned by the previous occupant so a
+  // later read cannot attribute stale impulses to the new body.
+  const size_t reaction_index =
+      static_cast<size_t>(vertex_index) * kMaxContactsPerVertex +
+      static_cast<size_t>(contact_slot);
+  body->reaction_forces[reaction_index].setZero();
+  body->reaction_samples[reaction_index] = 0;
   return 1;
 }
 
