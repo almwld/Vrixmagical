@@ -170,8 +170,12 @@ class CoupledSoftBodyPhysics {
   void _refreshProxyGeometry(List<double> positions) {
     final candidate = _buildBoundedProxyVertices(positions);
     if (candidate.length != _proxyVertices.length) {
-      scene.updateKinematicConvexHull(id: proxyBodyId, vertices: candidate);
-      _proxyVertices = candidate;
+      if (scene.updateKinematicConvexHull(
+        id: proxyBodyId,
+        vertices: candidate,
+      )) {
+        _proxyVertices = candidate;
+      }
       return;
     }
     final thresholdSquared =
@@ -186,8 +190,12 @@ class CoupledSoftBodyPhysics {
       if (maximumDisplacementSquared > thresholdSquared) break;
     }
     if (maximumDisplacementSquared <= thresholdSquared) return;
-    scene.updateKinematicConvexHull(id: proxyBodyId, vertices: candidate);
-    _proxyVertices = candidate;
+    if (scene.updateKinematicConvexHull(
+      id: proxyBodyId,
+      vertices: candidate,
+    )) {
+      _proxyVertices = candidate;
+    }
   }
 
   void _refreshContactsFromJoltOverlaps() {

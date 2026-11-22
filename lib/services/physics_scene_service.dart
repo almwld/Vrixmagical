@@ -278,7 +278,7 @@ class PhysicsSceneService {
 
   /// Re-cooks and replaces a kinematic convex hull without destroying its body.
   /// The body ID, sensor configuration, and event identity remain stable.
-  void updateKinematicConvexHull({
+  bool updateKinematicConvexHull({
     required String id,
     required List<Vector3> vertices,
   }) {
@@ -300,11 +300,12 @@ class PhysicsSceneService {
       ],
       convexRadius: record.shape.convexRadius,
     );
-    using((arena) {
+    final updated = using((arena) {
       final nativeShape = _createShape(arena, nextShape);
-      if (nativeShape.address == 0) {
-        throw StateError('Jolt could not cook the updated convex hull.');
-      }
+      // A deformed mesh can become temporarily degenerate (for example, when
+      // it is flattened). Keep the last valid Jolt proxy instead of failing
+      // the entire simulation frame; the caller can retry on a later update.
+      if (nativeShape.address == 0) return false;
       try {
         jolt.JPH_BodyInterface_SetShape(
           _getBodyInterface(),
@@ -316,8 +317,11 @@ class PhysicsSceneService {
       } finally {
         jolt.jj_shape_release(nativeShape.cast<Void>());
       }
+      return true;
     });
+    if (!updated) return false;
     record.shape = nextShape;
+    return true;
   }
 
   /// True only for dynamic bodies that can receive XPBD reaction impulses.
