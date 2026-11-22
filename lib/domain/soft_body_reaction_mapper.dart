@@ -5,11 +5,13 @@ class SoftBodyReactionContact {
   const SoftBodyReactionContact({
     required this.rigidBodyId,
     required this.vertexIndex,
+    required this.contactSlot,
     required this.worldPoint,
   });
 
   final String rigidBodyId;
   final int vertexIndex;
+  final int contactSlot;
   final Vector3 worldPoint;
 }
 
@@ -51,7 +53,10 @@ class SoftBodyReactionMapper {
       if (contact.vertexIndex < 0) {
         throw RangeError.index(contact.vertexIndex, packedForces);
       }
-      final offset = contact.vertexIndex * 3;
+      if (contact.contactSlot < 0 || contact.contactSlot >= 4) {
+        throw RangeError.value(contact.contactSlot, 'contactSlot');
+      }
+      final offset = (contact.vertexIndex * 4 + contact.contactSlot) * 3;
       if (offset + 2 >= packedForces.length) {
         throw RangeError(
           'Reaction buffer does not contain vertex ' +

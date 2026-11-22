@@ -9,16 +9,20 @@ void main() {
   group('SoftBodyReactionMapper', () {
     test('keeps equal and opposite impulses at their separate contact points', () {
       final mapped = SoftBodyReactionMapper.map(
-        packedForces: <double>[0, 0, 10, 0, 0, -10],
+        packedForces: List<double>.filled(24, 0)
+          ..[2] = 10
+          ..[14] = -10,
         contacts: <SoftBodyReactionContact>[
           SoftBodyReactionContact(
             rigidBodyId: 'dynamic',
             vertexIndex: 0,
+            contactSlot: 0,
             worldPoint: Vector3(1, 2, 0),
           ),
           SoftBodyReactionContact(
             rigidBodyId: 'dynamic',
             vertexIndex: 1,
+            contactSlot: 0,
             worldPoint: Vector3(-1, 2, 0),
           ),
         ],
@@ -39,11 +43,12 @@ void main() {
         ..rotateY(math.pi / 2)
         ..setTranslation(Vector3(4, 5, 6));
       final mapped = SoftBodyReactionMapper.map(
-        packedForces: <double>[0, 0, 5],
+        packedForces: <double>[0, 0, 5, ...List<double>.filled(9, 0)],
         contacts: <SoftBodyReactionContact>[
           SoftBodyReactionContact(
             rigidBodyId: 'dynamic',
             vertexIndex: 0,
+            contactSlot: 0,
             worldPoint: Vector3(4, 5, 6),
           ),
         ],
@@ -60,16 +65,18 @@ void main() {
 
     test('skips non-dynamic bodies and zero impulses', () {
       final mapped = SoftBodyReactionMapper.map(
-        packedForces: <double>[0, 0, 4, 0, 0, 0],
+        packedForces: <double>[0, 0, 4, ...List<double>.filled(21, 0)],
         contacts: <SoftBodyReactionContact>[
           SoftBodyReactionContact(
             rigidBodyId: 'static',
             vertexIndex: 0,
+            contactSlot: 0,
             worldPoint: Vector3.zero(),
           ),
           SoftBodyReactionContact(
             rigidBodyId: 'dynamic',
             vertexIndex: 1,
+            contactSlot: 0,
             worldPoint: Vector3.zero(),
           ),
         ],
@@ -86,6 +93,7 @@ void main() {
         SoftBodyReactionContact(
           rigidBodyId: 'dynamic',
           vertexIndex: 1,
+          contactSlot: 0,
           worldPoint: Vector3.zero(),
         ),
       ];
@@ -116,6 +124,7 @@ void main() {
             SoftBodyReactionContact(
               rigidBodyId: 'dynamic',
               vertexIndex: 0,
+              contactSlot: 0,
               worldPoint: Vector3.zero(),
             ),
           ],
@@ -125,6 +134,38 @@ void main() {
         ),
         throwsStateError,
       );
+    });
+
+    test('maps two rigid bodies from independent slots on one vertex', () {
+      final packed = List<double>.filled(12, 0)
+        ..[2] = 3
+        ..[5] = -7;
+      final mapped = SoftBodyReactionMapper.map(
+        packedForces: packed,
+        contacts: <SoftBodyReactionContact>[
+          SoftBodyReactionContact(
+            rigidBodyId: 'rigid-a',
+            vertexIndex: 0,
+            contactSlot: 0,
+            worldPoint: Vector3(1, 0, 0),
+          ),
+          SoftBodyReactionContact(
+            rigidBodyId: 'rigid-b',
+            vertexIndex: 0,
+            contactSlot: 1,
+            worldPoint: Vector3(-1, 0, 0),
+          ),
+        ],
+        worldTransform: Matrix4.identity(),
+        deltaSeconds: 0.1,
+        isDynamicBody: (_) => true,
+      );
+
+      expect(mapped, hasLength(2));
+      expect(mapped[0].rigidBodyId, 'rigid-a');
+      expect(mapped[0].impulse.z, closeTo(0.3, 1e-9));
+      expect(mapped[1].rigidBodyId, 'rigid-b');
+      expect(mapped[1].impulse.z, closeTo(-0.7, 1e-9));
     });
   });
 }

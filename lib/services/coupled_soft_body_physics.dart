@@ -4,7 +4,6 @@ import 'package:vector_math/vector_math_64.dart';
 
 import 'package:vrix_soft_body/vrix_soft_body.dart';
 import 'physics_scene_service.dart';
-import '../domain/soft_body_contact_policy.dart';
 import '../domain/soft_body_reaction_mapper.dart';
 
 /// Couples one XPBD deformable mesh to Jolt through a kinematic convex proxy.
@@ -59,7 +58,8 @@ class CoupledSoftBodyPhysics {
   final double maxContactDistance;
   final Matrix4 _initialTransform;
   late final Vector3 _initialCentroid;
-  final Map<int, _ActiveContact> _contacts = <int, _ActiveContact>{};
+  final Map<int, Map<String, _ActiveContact>> _contacts =
+      <int, Map<String, _ActiveContact>>{};
   bool _disposed = false;
   int _coupledSteps = 0;
   final Vector3 _lastAppliedReactionImpulse = Vector3.zero();
@@ -67,7 +67,9 @@ class CoupledSoftBodyPhysics {
   int _lastAppliedReactionCount = 0;
 
   int get coupledSteps => _coupledSteps;
-  int get activeContactCount => _contacts.length;
+  int get activeContactCount => _contacts.values.fold<int>(
+        0, (count, contacts) => count + contacts.length,
+      );
   int get lastAppliedReactionCount => _lastAppliedReactionCount;
   Vector3 get lastAppliedReactionImpulse =>
       Vector3.copy(_lastAppliedReactionImpulse);
@@ -180,7 +182,7 @@ class CoupledSoftBodyPhysics {
     final state = engine.readState(softBody);
     final hits = scene.overlapBody(proxyBodyId, includeSensors: false)
       ..sort((a, b) => (a.bodyId ?? '').compareTo(b.bodyId ?? ''));
-    final nextContacts = <int, _ActiveContact>{};
+    final nextContacts = <int, Map<String, _ActiveContact>>{};
     _lastContactNormalWorld.setZero();
 
     for (final hit in hits) {
@@ -201,16 +203,18 @@ class CoupledSoftBodyPhysics {
       final nearest = _nearestVertex(state.positions, localPoint);
       if (nearest.index < 0 || nearest.distance > maxContactDistance) continue;
 
-      final currentContact = nextContacts[nearest.index];
-      if (!SoftBodyContactPolicy.shouldAcceptContact(
-        currentBodyId: currentContact?.otherBodyId,
-        incomingBodyId: otherBody,
-      )) {
+      final contactsForVertex = nextContacts.putIfAbsent(
+        nearest.index, () => <String, _ActiveContact>{},
+      );
+      if (contactsForVertex.containsKey(otherBody) ||
+          contactsForVertex.length >= 4) {
         continue;
       }
-      nextContacts[nearest.index] = _ActiveContact(
+      final slot = contactsForVertex.length;
+      contactsForVertex[otherBody] = _ActiveContact(
         otherBodyId: otherBody,
         vertexIndex: nearest.index,
+        contactSlot: slot,
         worldPoint: Vector3.copy(hit.point),
         localPoint: localPoint,
         localNormal: localNormal,
@@ -218,32 +222,41 @@ class CoupledSoftBodyPhysics {
       _lastContactNormalWorld.setFrom(hit.normal);
     }
 
-    // The native XPBD contract stores one contact per vertex. Clear contacts
-    // that disappeared or whose deterministic rigid-body owner changed.
+    // Preserve each rigid body's independent native slot and multiplier.
     for (final entry in _contacts.entries) {
-      final next = nextContacts[entry.key];
-      if (next == null || next.otherBodyId != entry.value.otherBodyId) {
-        engine.clearContact(body: softBody, vertexIndex: entry.key);
+      final next = nextContacts[entry.key] ?? const <String, _ActiveContact>{};
+      for (final previous in entry.value.values) {
+        if (!next.containsKey(previous.otherBodyId) ||
+            next[previous.otherBodyId]!.contactSlot != previous.contactSlot) {
+          engine.clearContact(
+            body: softBody,
+            vertexIndex: entry.key,
+            contactSlot: previous.contactSlot,
+          );
+        }
       }
     }
 
-    for (final contact in nextContacts.values) {
-      engine.setContact(
-        body: softBody,
-        vertexIndex: contact.vertexIndex,
-        point: <double>[
-          contact.localPoint.x,
-          contact.localPoint.y,
-          contact.localPoint.z,
-        ],
-        normal: <double>[
-          contact.localNormal.x,
-          contact.localNormal.y,
-          contact.localNormal.z,
-        ],
-        friction: contactFriction,
-        compliance: contactCompliance,
-      );
+    for (final contactsForVertex in nextContacts.values) {
+      for (final contact in contactsForVertex.values) {
+        engine.setContact(
+          body: softBody,
+          vertexIndex: contact.vertexIndex,
+          contactSlot: contact.contactSlot,
+          point: <double>[
+            contact.localPoint.x,
+            contact.localPoint.y,
+            contact.localPoint.z,
+          ],
+          normal: <double>[
+            contact.localNormal.x,
+            contact.localNormal.y,
+            contact.localNormal.z,
+          ],
+          friction: contactFriction,
+          compliance: contactCompliance,
+        );
+      }
     }
     _contacts
       ..clear()
@@ -258,10 +271,11 @@ class CoupledSoftBodyPhysics {
 
     final impulses = SoftBodyReactionMapper.map(
       packedForces: reactions,
-      contacts: _contacts.values.map(
+      contacts: _contacts.values.expand((items) => items.values).map(
         (contact) => SoftBodyReactionContact(
           rigidBodyId: contact.otherBodyId,
           vertexIndex: contact.vertexIndex,
+          contactSlot: contact.contactSlot,
           worldPoint: contact.worldPoint,
         ),
       ),
@@ -318,8 +332,14 @@ class CoupledSoftBodyPhysics {
 
   void dispose({bool removeProxy = true}) {
     if (_disposed) return;
-    for (final contact in _contacts.values) {
-      engine.clearContact(body: softBody, vertexIndex: contact.vertexIndex);
+    for (final contacts in _contacts.values) {
+      for (final contact in contacts.values) {
+        engine.clearContact(
+          body: softBody,
+          vertexIndex: contact.vertexIndex,
+          contactSlot: contact.contactSlot,
+        );
+      }
     }
     _contacts.clear();
     if (removeProxy) scene.removeBody(proxyBodyId);
@@ -331,6 +351,7 @@ class _ActiveContact {
   const _ActiveContact({
     required this.otherBodyId,
     required this.vertexIndex,
+    required this.contactSlot,
     required this.worldPoint,
     required this.localPoint,
     required this.localNormal,
@@ -338,6 +359,7 @@ class _ActiveContact {
 
   final String otherBodyId;
   final int vertexIndex;
+  final int contactSlot;
   final Vector3 worldPoint;
   final Vector3 localPoint;
   final Vector3 localNormal;

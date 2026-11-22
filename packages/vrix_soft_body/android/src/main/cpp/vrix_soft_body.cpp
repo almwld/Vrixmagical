@@ -44,6 +44,8 @@ struct ContactConstraint {
   Real lambda_normal = 0;
 };
 
+constexpr size_t kMaxContactsPerVertex = 4;
+
 struct Body {
   std::vector<Vector3r> positions;
   std::vector<Vector3r> previous;
@@ -51,7 +53,7 @@ struct Body {
   std::vector<Real> inverse_masses;
   std::vector<Tetrahedron> tetrahedra;
   std::vector<PointTarget> targets;
-  std::vector<ContactConstraint> contacts;
+  std::vector<std::vector<ContactConstraint>> contacts;
   std::vector<Vector3r> reaction_forces;
   std::vector<uint32_t> reaction_samples;
   Real youngs_modulus = 25000;
@@ -97,10 +99,12 @@ void solve_substep(Body& body) {
 
   for (Tetrahedron& tetra : body.tetrahedra) tetra.lambda = 0;
   // XPBD multipliers are accumulated within one fixed timestep only.
-  for (ContactConstraint& contact : body.contacts) {
-    if (!contact.active) continue;
-    contact.lambda_normal = 0;
-    contact.lambda_tangent.setZero();
+  for (auto& vertex_contacts : body.contacts) {
+    for (ContactConstraint& contact : vertex_contacts) {
+      if (!contact.active) continue;
+      contact.lambda_normal = 0;
+      contact.lambda_tangent.setZero();
+    }
   }
 
   for (int iteration = 0; iteration < body.iterations; ++iteration) {
@@ -140,43 +144,42 @@ void solve_substep(Body& body) {
       (void)correction_target;
     }
 
-    // Unilateral XPBD contact: the soft vertex may move away from the rigid
-    // surface, but the accumulated normal multiplier can never become tensile.
+    // Solve every independent rigid-body contact slot for this vertex.
     for (size_t i = 0; i < body.contacts.size(); ++i) {
-      ContactConstraint& contact = body.contacts[i];
       const Real inverse_mass = body.inverse_masses[i];
-      if (!contact.active || inverse_mass <= static_cast<Real>(0)) continue;
-      const Real alpha = contact.compliance / (dt * dt);
-      const Real constraint =
-          (body.positions[i] - contact.point).dot(contact.normal);
-      const Real delta_lambda =
-          (-constraint - alpha * contact.lambda_normal) /
-          (inverse_mass + alpha);
-      const Real next_lambda =
-          std::max(static_cast<Real>(0),
-                   contact.lambda_normal + delta_lambda);
-      const Real applied_lambda = next_lambda - contact.lambda_normal;
-      contact.lambda_normal = next_lambda;
-      body.positions[i] +=
-          inverse_mass * applied_lambda * contact.normal;
+      if (inverse_mass <= static_cast<Real>(0)) continue;
+      for (ContactConstraint& contact : body.contacts[i]) {
+        if (!contact.active) continue;
+        const Real alpha = contact.compliance / (dt * dt);
+        const Real constraint =
+            (body.positions[i] - contact.point).dot(contact.normal);
+        const Real delta_lambda =
+            (-constraint - alpha * contact.lambda_normal) /
+            (inverse_mass + alpha);
+        const Real next_lambda =
+            std::max(static_cast<Real>(0),
+                     contact.lambda_normal + delta_lambda);
+        const Real applied_lambda = next_lambda - contact.lambda_normal;
+        contact.lambda_normal = next_lambda;
+        body.positions[i] +=
+            inverse_mass * applied_lambda * contact.normal;
 
-      // Position-level Coulomb friction. The tangential multiplier is clamped
-      // by mu * lambda_n, preventing an unbounded sticky contact.
-      const Vector3r displacement = body.positions[i] - body.previous[i];
-      const Vector3r tangent =
-          displacement - contact.normal * displacement.dot(contact.normal);
-      const Real tangent_length = tangent.norm();
-      if (contact.friction > 0 && tangent_length > static_cast<Real>(1e-9)) {
-        Vector3r candidate =
-            contact.lambda_tangent - tangent / inverse_mass;
-        const Real maximum = contact.friction * contact.lambda_normal;
-        const Real candidate_length = candidate.norm();
-        if (candidate_length > maximum && candidate_length > 0) {
-          candidate *= maximum / candidate_length;
+        const Vector3r displacement = body.positions[i] - body.previous[i];
+        const Vector3r tangent =
+            displacement - contact.normal * displacement.dot(contact.normal);
+        const Real tangent_length = tangent.norm();
+        if (contact.friction > 0 && tangent_length > static_cast<Real>(1e-9)) {
+          Vector3r candidate =
+              contact.lambda_tangent - tangent / inverse_mass;
+          const Real maximum = contact.friction * contact.lambda_normal;
+          const Real candidate_length = candidate.norm();
+          if (candidate_length > maximum && candidate_length > 0) {
+            candidate *= maximum / candidate_length;
+          }
+          const Vector3r delta_tangent = candidate - contact.lambda_tangent;
+          contact.lambda_tangent = candidate;
+          body.positions[i] += inverse_mass * delta_tangent;
         }
-        const Vector3r delta_tangent = candidate - contact.lambda_tangent;
-        contact.lambda_tangent = candidate;
-        body.positions[i] += inverse_mass * delta_tangent;
       }
     }
   }
@@ -192,12 +195,15 @@ void solve_substep(Body& body) {
     if (target.active) target.lambda = 0;
   }
   for (size_t i = 0; i < body.contacts.size(); ++i) {
-    const ContactConstraint& contact = body.contacts[i];
-    if (!contact.active) continue;
-    body.reaction_forces[i] +=
-        -(contact.lambda_normal * contact.normal +
-          contact.lambda_tangent) / (dt * dt);
-    ++body.reaction_samples[i];
+    for (size_t slot = 0; slot < body.contacts[i].size(); ++slot) {
+      const ContactConstraint& contact = body.contacts[i][slot];
+      if (!contact.active) continue;
+      const size_t reaction_index = i * kMaxContactsPerVertex + slot;
+      body.reaction_forces[reaction_index] +=
+          -(contact.lambda_normal * contact.normal +
+            contact.lambda_tangent) / (dt * dt);
+      ++body.reaction_samples[reaction_index];
+    }
   }
 }
 }  // namespace
@@ -243,9 +249,9 @@ VRIX_EXPORT void* vrix_soft_body_create(
     body->inverse_masses.resize(static_cast<size_t>(vertex_count), 0);
     body->targets.resize(static_cast<size_t>(vertex_count));
     body->contacts.resize(static_cast<size_t>(vertex_count));
-    body->reaction_forces.resize(static_cast<size_t>(vertex_count),
+    body->reaction_forces.resize(static_cast<size_t>(vertex_count) * kMaxContactsPerVertex,
                                  Vector3r::Zero());
-    body->reaction_samples.resize(static_cast<size_t>(vertex_count), 0);
+    body->reaction_samples.resize(static_cast<size_t>(vertex_count) * kMaxContactsPerVertex, 0);
 
     body->youngs_modulus = static_cast<Real>(youngs_modulus_pa);
     body->poisson_ratio = static_cast<Real>(poisson_ratio);
@@ -356,12 +362,13 @@ VRIX_EXPORT int vrix_soft_body_set_point_target(
 }
 
 VRIX_EXPORT int vrix_soft_body_set_contact(
-    void* handle, int vertex_index, const float* point_xyz,
+    void* handle, int vertex_index, int contact_slot, const float* point_xyz,
     const float* normal_xyz, float friction, float compliance) {
   auto* body = static_cast<Body*>(handle);
   if (body == nullptr || body->disposed || point_xyz == nullptr ||
       normal_xyz == nullptr || vertex_index < 0 ||
       vertex_index >= static_cast<int>(body->positions.size()) ||
+      contact_slot < 0 || contact_slot >= static_cast<int>(kMaxContactsPerVertex) ||
       !std::isfinite(friction) || friction < 0 ||
       !std::isfinite(compliance) || compliance < 0) {
     return 0;
@@ -377,8 +384,11 @@ VRIX_EXPORT int vrix_soft_body_set_contact(
       !finite(normal_length) || normal_length <= static_cast<Real>(1e-8)) {
     return 0;
   }
-  ContactConstraint& contact =
-      body->contacts[static_cast<size_t>(vertex_index)];
+  auto& contacts = body->contacts[static_cast<size_t>(vertex_index)];
+  if (contacts.size() <= static_cast<size_t>(contact_slot)) {
+    contacts.resize(static_cast<size_t>(contact_slot) + 1);
+  }
+  ContactConstraint& contact = contacts[static_cast<size_t>(contact_slot)];
   contact.active = true;
   contact.point = point;
   contact.normal = normal / normal_length;
@@ -389,13 +399,18 @@ VRIX_EXPORT int vrix_soft_body_set_contact(
   return 1;
 }
 
-VRIX_EXPORT int vrix_soft_body_clear_contact(void* handle, int vertex_index) {
+VRIX_EXPORT int vrix_soft_body_clear_contact(void* handle, int vertex_index,
+                                                int contact_slot) {
   auto* body = static_cast<Body*>(handle);
   if (body == nullptr || body->disposed || vertex_index < 0 ||
-      vertex_index >= static_cast<int>(body->contacts.size())) {
+      vertex_index >= static_cast<int>(body->contacts.size()) ||
+      contact_slot < 0 || contact_slot >= static_cast<int>(kMaxContactsPerVertex)) {
     return 0;
   }
-  body->contacts[static_cast<size_t>(vertex_index)] = ContactConstraint{};
+  auto& contacts = body->contacts[static_cast<size_t>(vertex_index)];
+  if (contacts.size() > static_cast<size_t>(contact_slot)) {
+    contacts[static_cast<size_t>(contact_slot)] = ContactConstraint{};
+  }
   return 1;
 }
 
