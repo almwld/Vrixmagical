@@ -85,7 +85,7 @@ class _BodyRecord {
   });
 
   final String id;
-  final _ShapeSpec shape;
+  _ShapeSpec shape;
   int motionType;
   Matrix4 transform;
   final double friction;
@@ -274,6 +274,50 @@ class PhysicsSceneService {
       sensor: sensor,
       continuous: !sensor,
     );
+  }
+
+  /// Re-cooks and replaces a kinematic convex hull without destroying its body.
+  /// The body ID, sensor configuration, and event identity remain stable.
+  void updateKinematicConvexHull({
+    required String id,
+    required List<Vector3> vertices,
+  }) {
+    _ensureAvailable();
+    final record = _bodies[id];
+    if (record == null) throw StateError('Unknown physics body: $id');
+    if (record.motionType != jolt.JJ_MOTION_KINEMATIC ||
+        record.shape.kind != _ShapeKind.convexHull) {
+      throw StateError('Body $id is not a kinematic convex-hull proxy.');
+    }
+    if (vertices.length < 4 || vertices.length > 4096 ||
+        vertices.any((vertex) => !_isFiniteVector(vertex))) {
+      throw ArgumentError('Updated convex hull must contain 4..4096 finite vertices.');
+    }
+    final nextShape = _ShapeSpec(
+      _ShapeKind.convexHull,
+      <double>[
+        for (final vertex in vertices) ...<double>[vertex.x, vertex.y, vertex.z],
+      ],
+      convexRadius: record.shape.convexRadius,
+    );
+    using((arena) {
+      final nativeShape = _createShape(arena, nextShape);
+      if (nativeShape.address == 0) {
+        throw StateError('Jolt could not cook the updated convex hull.');
+      }
+      try {
+        jolt.JPH_BodyInterface_SetShape(
+          _getBodyInterface(),
+          record.handle,
+          nativeShape,
+          false,
+          jolt.JPH_Activation.JPH_Activation_Activate,
+        );
+      } finally {
+        jolt.jj_shape_release(nativeShape.cast<Void>());
+      }
+    });
+    record.shape = nextShape;
   }
 
   /// True only for dynamic bodies that can receive XPBD reaction impulses.

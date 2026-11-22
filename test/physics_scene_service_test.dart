@@ -147,6 +147,23 @@ void main() {
       expect(overlaps.any((hit) => hit.bodyId == 'contact-probe'), isTrue);
       expect(physics.isDynamicBody('contact-probe'), isTrue);
       expect(physics.isDynamicBody('soft-proxy'), isFalse);
+
+      physics.updateKinematicConvexHull(
+        id: 'soft-proxy',
+        vertices: <Vector3>[
+          Vector3(2.5, -0.5, -0.5),
+          Vector3(3.5, -0.5, -0.5),
+          Vector3(3, 0.5, -0.5),
+          Vector3(3, 0, 0.5),
+        ],
+      );
+      physics.advance(1 / 60);
+      expect(physics.bodyCount, 2);
+      expect(
+        physics.overlapBody('soft-proxy')
+            .any((hit) => hit.bodyId == 'contact-probe'),
+        isFalse,
+      );
     });
 
     test('supports constraints and preserves joint graph during body teleports', () {

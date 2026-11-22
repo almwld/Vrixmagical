@@ -30,14 +30,17 @@ class CoupledSoftBodyPhysics {
     this.contactFriction = 0.5,
     this.contactCompliance = 0,
     this.maxContactDistance = 0.08,
+    this.proxyShapeUpdateThreshold = 0.015,
   }) : _initialTransform = Matrix4.copy(initialTransform) {
     mesh.validate();
     if (!contactFriction.isFinite || contactFriction < 0 ||
         !contactCompliance.isFinite || contactCompliance < 0 ||
-        !maxContactDistance.isFinite || maxContactDistance <= 0) {
+        !maxContactDistance.isFinite || maxContactDistance <= 0 ||
+        !proxyShapeUpdateThreshold.isFinite || proxyShapeUpdateThreshold <= 0) {
       throw ArgumentError('Invalid deformable contact parameters.');
     }
-    final localVertices = _buildBoundedProxyVertices();
+    final localVertices = _buildBoundedProxyVertices(mesh.positions);
+    _proxyVertices = localVertices;
     scene.addKinematicConvexHull(
       id: proxyBodyId,
       worldTransform: _initialTransform,
@@ -56,7 +59,9 @@ class CoupledSoftBodyPhysics {
   final double contactFriction;
   final double contactCompliance;
   final double maxContactDistance;
+  final double proxyShapeUpdateThreshold;
   final Matrix4 _initialTransform;
+  late List<Vector3> _proxyVertices;
   late final Vector3 _initialCentroid;
   final Map<int, Map<String, _ActiveContact>> _contacts =
       <int, Map<String, _ActiveContact>>{};
@@ -86,6 +91,7 @@ class CoupledSoftBodyPhysics {
     }
 
     final before = engine.readState(softBody);
+    _refreshProxyGeometry(before.positions);
     _moveProxyToSoftBodyCentre(before.positions, deltaSeconds);
     final rigidSteps = scene.advance(deltaSeconds);
     _refreshContactsFromJoltOverlaps();
@@ -102,15 +108,18 @@ class CoupledSoftBodyPhysics {
   /// bounded for mobile even when a scan contains tens of thousands of XPBD
   /// vertices. The AABB corners preserve conservative spatial coverage while
   /// deterministic surface samples retain some curvature for contact queries.
-  List<Vector3> _buildBoundedProxyVertices() {
+  List<Vector3> _buildBoundedProxyVertices(List<double> positions) {
     const maximumProxyVertices = 4096;
+    if (positions.length != mesh.vertexCount * 3) {
+      throw StateError('XPBD proxy geometry does not match the coupled mesh.');
+    }
     if (mesh.vertexCount <= maximumProxyVertices) {
       return List<Vector3>.generate(
         mesh.vertexCount,
         (index) => Vector3(
-          mesh.positions[index * 3],
-          mesh.positions[index * 3 + 1],
-          mesh.positions[index * 3 + 2],
+          positions[index * 3],
+          positions[index * 3 + 1],
+          positions[index * 3 + 2],
         ),
         growable: false,
       );
@@ -123,9 +132,9 @@ class CoupledSoftBodyPhysics {
     var maxY = double.negativeInfinity;
     var maxZ = double.negativeInfinity;
     for (var i = 0; i < mesh.vertexCount; i++) {
-      final x = mesh.positions[i * 3];
-      final y = mesh.positions[i * 3 + 1];
-      final z = mesh.positions[i * 3 + 2];
+      final x = positions[i * 3];
+      final y = positions[i * 3 + 1];
+      final z = positions[i * 3 + 2];
       minX = math.min(minX, x);
       minY = math.min(minY, y);
       minZ = math.min(minZ, z);
@@ -148,12 +157,35 @@ class CoupledSoftBodyPhysics {
     final stride = (mesh.vertexCount / sampleBudget).ceil();
     for (var i = 0; i < mesh.vertexCount && vertices.length < maximumProxyVertices; i += stride) {
       vertices.add(Vector3(
-        mesh.positions[i * 3],
-        mesh.positions[i * 3 + 1],
-        mesh.positions[i * 3 + 2],
+        positions[i * 3],
+        positions[i * 3 + 1],
+        positions[i * 3 + 2],
       ));
     }
     return vertices;
+  }
+
+  void _refreshProxyGeometry(List<double> positions) {
+    final candidate = _buildBoundedProxyVertices(positions);
+    if (candidate.length != _proxyVertices.length) {
+      scene.updateKinematicConvexHull(id: proxyBodyId, vertices: candidate);
+      _proxyVertices = candidate;
+      return;
+    }
+    final thresholdSquared =
+        proxyShapeUpdateThreshold * proxyShapeUpdateThreshold;
+    var maximumDisplacementSquared = 0.0;
+    for (var i = 0; i < candidate.length; i++) {
+      final displacement = candidate[i] - _proxyVertices[i];
+      maximumDisplacementSquared = math.max(
+        maximumDisplacementSquared,
+        displacement.length2,
+      );
+      if (maximumDisplacementSquared > thresholdSquared) break;
+    }
+    if (maximumDisplacementSquared <= thresholdSquared) return;
+    scene.updateKinematicConvexHull(id: proxyBodyId, vertices: candidate);
+    _proxyVertices = candidate;
   }
 
   void _moveProxyToSoftBodyCentre(List<double> positions, double dt) {
