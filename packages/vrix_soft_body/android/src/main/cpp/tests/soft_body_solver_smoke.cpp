@@ -98,7 +98,8 @@ int main() {
     vrix_soft_body_destroy(body);
     return 8;
   }
-  if (vrix_soft_body_set_contact(body, 1, 1, contact_point, contact_normal,
+  const float second_contact_point[] = {0.8f, 0.0f, 0.0f};
+  if (vrix_soft_body_set_contact(body, 1, 1, second_contact_point, contact_normal,
                                  0.4f, 0.0f) != 1) {
     std::fprintf(stderr, "XPBD rejected a second simultaneous contact slot.\\n");
     vrix_soft_body_destroy(body);
