@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: flutter-checks-${{ github.event.pull_request.number || github.ref }}
@@ -193,25 +193,10 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Commit regenerated just_jolt FFI bindings
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      - name: Verify regenerated just_jolt FFI bindings are committed
         run: |
-          generated_file="just-jolt/lib/src/native/bindings.g.dart"
-          if git diff --quiet -- "$generated_file"; then
-            echo "FFI bindings are already up to date."
-            exit 0
+          if ! git diff --quiet -- just-jolt/lib/src/native/bindings.g.dart; then
+            echo "::error::Generated FFI bindings are stale. Regenerate them locally and commit the updated bindings."
+            git diff --stat -- just-jolt/lib/src/native/bindings.g.dart
+            exit 1
           fi
-
-          # Pull-request checkouts use GitHub's synthetic merge ref. Preserve
-          # the generated file, then commit it on the actual PR head branch.
-          cp "$generated_file" /tmp/vrix-bindings.g.dart
-          git fetch origin "${{ github.head_ref }}"
-          git checkout -B "${{ github.head_ref }}" "origin/${{ github.head_ref }}"
-          cp /tmp/vrix-bindings.g.dart "$generated_file"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$generated_file"
-          git commit -m "chore(just-jolt): regenerate native FFI bindings"
-          git push origin "HEAD:${{ github.head_ref }}"
-
